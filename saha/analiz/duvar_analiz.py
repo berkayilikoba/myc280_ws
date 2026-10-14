@@ -25,7 +25,7 @@ from rclpy.serialization import deserialize_message
 from sensor_msgs.msg import CameraInfo, Image, LaserScan
 from tf2_msgs.msg import TFMessage
 
-from bag2vlmaps import T, damga, okuyucu, q2R, rpy2R, zincir
+from bag2vlmaps import T, damga, kamera_dis, okuyucu, q2R, zincir
 
 BURADA = os.path.dirname(os.path.abspath(__file__))
 LIDAR = (0.137, 0.015, 0.0)          # laser_duz: base_link'e göre (yön zaten düzeltilmiş)
@@ -79,8 +79,7 @@ def main():
     odom = np.array(sorted(odom))
     D = duraklar(odom, odom[0, 3])
     print(f'{len(D)} durak bulundu')
-    kal = yaml.safe_load(open(a.kalib))['base_link_to_camera_link']
-    T_b_do = T(rpy2R(*kal['rotation_rpy_rad']), kal['translation_m']) @ zincir(
+    T_b_do = kamera_dis(tfs, a.kalib) @ zincir(
         tfs, 'camera_link', 'camera_depth_frame', 'camera_depth_optical_frame')
 
     # durak başına derinlik kareleri

@@ -14,11 +14,10 @@ import os
 
 import cv2
 import numpy as np
-import yaml
 from rclpy.serialization import deserialize_message
 from sensor_msgs.msg import Image
 
-from bag2vlmaps import (BURADA, T, damga, derinlik_hizala, goruntu, okuyucu, poz_ara, rpy2R, sensor_oku, zincir)
+from bag2vlmaps import (BURADA, damga, kamera_dis, derinlik_hizala, goruntu, okuyucu, poz_ara, sensor_oku, zincir)
 from donus_analiz import hiza
 
 
@@ -32,9 +31,8 @@ def main():
     ap.add_argument('--kalib', default=os.path.join(BURADA, '..', 'config', 'kamera_kalibrasyon.yaml'))
     a = ap.parse_args()
     ofs = [float(x) / 1000 for x in a.ofsetler.split(',')]
-    kal = yaml.safe_load(open(a.kalib))['base_link_to_camera_link']
-    T_b_cl = T(rpy2R(*kal['rotation_rpy_rad']), kal['translation_m'])
     O, tfs, ci = sensor_oku(a.sensor_bag)
+    T_b_cl = kamera_dis(tfs, a.kalib)
     T_b_co = T_b_cl @ zincir(tfs, 'camera_link', 'camera_depth_frame', 'camera_color_frame', 'camera_color_optical_frame')
     T_b_do = T_b_cl @ zincir(tfs, 'camera_link', 'camera_depth_frame', 'camera_depth_optical_frame')
     Kc, Dc = np.array(ci['color'].k).reshape(3, 3), np.array(ci['color'].d)

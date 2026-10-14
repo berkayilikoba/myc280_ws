@@ -5,7 +5,7 @@
 #   dikdortgen_tur.sh --tur 3 --hiz 0.15            dikdortgen_tur.sh --kenarlar 2,1,2,1 --sag
 set -u
 source "$(dirname "$(readlink -f "$0")")/ortam.sh"
-KAM=""; ssh -o BatchMode=yes "$ROBOT" 'pgrep -f "orbbec_camer[a]" >/dev/null' || KAM="--kamerasiz"
+KAM=""; ssh -o BatchMode=yes "$ROBOT" 'pgrep -f "orbbec_camer[a]|realsense2_camera_nod[e]" >/dev/null' || KAM="--kamerasiz"
 "$SAHA/kayit_baslat.sh" dikdortgen $KAM || exit 1
 OUT=$VERI/dikdortgen_$(date +%Y%m%d_%H%M%S).csv
 ros_humble; sleep 2

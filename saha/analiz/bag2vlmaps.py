@@ -111,12 +111,32 @@ def sensor_oku(uri):
 
 
 def zincir(tfs, *cerceveler):
-    M = np.eye(4)
-    for a, b in zip(cerceveler[:-1], cerceveler[1:]):
-        if (a, b) not in tfs:
-            raise KeyError(f'/tf_static içinde {a} -> {b} yok (kayıtta Orbbec sürücüsü açık mıydı?)')
-        M = M @ tfs[(a, b)]
-    return M
+    """İlk çerçeveden son çerçeveye dönüşüm (4x4). /tf_static grafında yol aranır (ters kenarlar dahil), ara çerçeveler
+    yalnız ipucu: Orbbec camera_link->camera_depth_frame->camera_color_frame, RealSense camera_link->camera_color_frame."""
+    bas, son = cerceveler[0], cerceveler[-1]
+    komsu = {}
+    for (a, b), M in tfs.items():
+        komsu.setdefault(a, []).append((b, M))
+        komsu.setdefault(b, []).append((a, np.linalg.inv(M)))
+    yol, kuyruk = {bas: np.eye(4)}, [bas]
+    while kuyruk:
+        a = kuyruk.pop(0)
+        for b, M in komsu.get(a, []):
+            if b not in yol:
+                yol[b] = yol[a] @ M
+                kuyruk.append(b)
+    if son not in yol:
+        raise KeyError(f'/tf_static içinde {bas} -> {son} yolu yok (kayıtta kamera sürücüsü açık mıydı?)')
+    return yol[son]
+
+
+def kamera_dis(tfs, kalib_yolu):
+    """base_link -> camera_link: kayıttaki /tf_static'te varsa o (nav_baslat.sh, o günkü kameranın kalibrasyonu),
+    yoksa kalibrasyon dosyası (09.10 Dabai kayıtlarında bu halka yoktu)."""
+    if ('base_link', 'camera_link') in tfs:
+        return tfs[('base_link', 'camera_link')].copy()
+    kal = yaml.safe_load(open(kalib_yolu))['base_link_to_camera_link']
+    return T(rpy2R(*kal['rotation_rpy_rad']), kal['translation_m'])
 
 
 def poz_ara(O, t, bosluk_s):
@@ -192,9 +212,9 @@ def main():
     a = ap.parse_args()
 
     kal = yaml.safe_load(open(a.kalib))['base_link_to_camera_link']
-    T_b_cl = T(rpy2R(*kal['rotation_rpy_rad']), kal['translation_m'])
-    T_b_cl[2, 3] += a.taban_z           # base_link -> base_footprint: dünya z = 0 zemin (poses.txt z = 0)
     O, tfs, ci = sensor_oku(a.sensor_bag)
+    T_b_cl = kamera_dis(tfs, a.kalib)
+    T_b_cl[2, 3] += a.taban_z           # base_link -> base_footprint: dünya z = 0 zemin (poses.txt z = 0)
     T_cl_co = zincir(tfs, 'camera_link', 'camera_depth_frame', 'camera_color_frame', 'camera_color_optical_frame')
     T_cl_do = zincir(tfs, 'camera_link', 'camera_depth_frame', 'camera_depth_optical_frame')
     T_b_co, T_b_do = T_b_cl @ T_cl_co, T_b_cl @ T_cl_do

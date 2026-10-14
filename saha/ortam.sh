@@ -31,8 +31,16 @@ kapat() {  # kapat <pkill deseni> [düğüm deseni]
 # kendisi yayınlar, bu halka eksikti). x, y: resmi AgileX URDF; z, roll, pitch: zemin düzleminden ölçüldü
 # (analiz/zemin_egimi.py, 09.10). Değerler ve kaynakları: config/kamera_kalibrasyon.yaml.
 # nav_baslat.sh / harita_baslat.sh çağırır; robottaki kayıt /tf_static'e alır.
-kamera_tf_yayinla() {  # kamera_tf_yayinla <log dosyası>
-  ros2 run tf2_ros static_transform_publisher --x 0.084 --y 0 --z 0.028 --roll 0.0075 --pitch -0.0248 --yaw 0 \
+kamera_tipi() {  # robota takılı derinlik kamerası: d435 | dabai (lsusb)
+  ssh -o BatchMode=yes -o ConnectTimeout=5 "$ROBOT" 'lsusb' 2>/dev/null | grep -q "8086:0b07" && echo d435 || echo dabai
+}
+kamera_kalib() {  # o kameranın kalibrasyon dosyası
+  [ "$(kamera_tipi)" = d435 ] && echo "$CFG/kamera_kalibrasyon_d435.yaml" || echo "$CFG/kamera_kalibrasyon.yaml"
+}
+kamera_tf_yayinla() {  # kamera_tf_yayinla <log dosyası>   (değerler kamera_kalib dosyasından)
+  local d; d=$(python3 -c "import yaml,sys; k=yaml.safe_load(open(sys.argv[1]))['base_link_to_camera_link']; t=k['translation_m']; r=k['rotation_rpy_rad']; print(*t, *r)" "$(kamera_kalib)")
+  set -- "$1" $d
+  ros2 run tf2_ros static_transform_publisher --x $2 --y $3 --z $4 --roll $5 --pitch $6 --yaw $7 \
     --frame-id base_link --child-frame-id camera_link > "$1" 2>&1 &
 }
 
