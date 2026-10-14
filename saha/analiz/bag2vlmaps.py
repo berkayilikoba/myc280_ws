@@ -160,7 +160,7 @@ def goruntu(m):
     raise ValueError(f'desteklenmeyen kodlama {m.encoding}')
 
 
-def derinlik_hizala(dmm, Kd, Kc, T_c_d, boyut, zmin=0.2, zmax=8.0):
+def derinlik_hizala(dmm, Kd, Kc, T_c_d, boyut, zmin=0.2, zmax=8.0, doldur=True):
     """Derinlik (mm, derinlik optik) -> renk optik çerçevesine izdüşüm, metre, z-tamponu (en yakın kazanır)."""
     H, W = dmm.shape
     v, u = np.nonzero((dmm > zmin * 1000) & (dmm < zmax * 1000))
@@ -177,6 +177,15 @@ def derinlik_hizala(dmm, Kd, Kc, T_c_d, boyut, zmin=0.2, zmax=8.0):
     sira = np.argsort(-zc)                      # uzaktan yakına yaz: son yazılan (en yakın) kalır
     out = np.zeros((Hc, Wc), np.float32)
     out[vc[sira], uc[sira]] = zc[sira]
+    if doldur:
+        # Seyrek izdüşüm delikleri: derinlik görüş alanı renkten genişse (D435: 87° vs 69°, ikisi de 640 px) derinlik
+        # pikselleri renk ızgarasına seyrek düşer (14.10: geçerli oran %40). 3x3'te >=4 geçerli komşusu olan boş piksele
+        # en yakın komşunun derinliği; nesne sınırı büyümez (tek taraflı kenarda komşu sayısı yetmez).
+        gec = (out > 0).astype(np.float32)
+        say = cv2.filter2D(gec, -1, np.ones((3, 3), np.float32), borderType=cv2.BORDER_CONSTANT)
+        mn = cv2.erode(np.where(out > 0, out, 1e3).astype(np.float32), np.ones((3, 3), np.uint8))
+        bos = (out == 0) & (say >= 4) & (mn < 1e3)
+        out[bos] = mn[bos]
     return out
 
 
@@ -207,6 +216,8 @@ def main():
                     help='bundan uzak derinliği at (m). Dabai σ: 1-2 m 4 mm, 2-4 m 28 mm, 4-8 m 89 mm (13.10)')
     ap.add_argument('--kenar', type=float, default=0.0,
                     help='uçan piksel süzgeci: 3x3 komşulukta derinlik farkı > kenar*z olan pikselleri at (0=kapalı)')
+    ap.add_argument('--doldurma', action='store_true',
+                    help='izdüşüm deliklerini doldurma (14.10 öncesi davranış; D435\'te derinlik seyrek kalır)')
     ap.add_argument('--max_w', type=float, default=0.0,
                     help='gövde açısal hızı bundan büyükse (rad/s) kareyi atla (bulanıklık/eşleme hatası; 0=kapalı)')
     a = ap.parse_args()
@@ -265,7 +276,7 @@ def main():
         dmm = derin[j][1]
         if a.kenar > 0:
             dmm = kenar_suz(dmm, a.kenar)
-        dep = derinlik_hizala(dmm, Kd, Kc, T_c_d, (Hc, Wc), zmax=a.zmax)
+        dep = derinlik_hizala(dmm, Kd, Kc, T_c_d, (Hc, Wc), zmax=a.zmax, doldur=not a.doldurma)
         cv2.imwrite(os.path.join(a.cikti, 'rgb', f'{n:06d}.png'), rgb)
         np.save(os.path.join(a.cikti, 'depth', f'{n:06d}.npy'), dep)
         for f, M in ((f_poz, Tw_bc), (f_kam, Tw_co)):
@@ -292,7 +303,7 @@ def main():
         yaml.safe_dump(cfg, f, sort_keys=False, default_flow_style=None)
     bilgi = {'kaynak': {'kamera_bag': os.path.abspath(a.kamera_bag), 'sensor_bag': os.path.abspath(a.sensor_bag)},
              'dunya_cercevesi': 'odom (robot açılışındaki konum), z yukarı, z=0 zemin; poses.txt = base_footprint', 'poz_kaynagi': '/odom_duz',
-             'sayilar': say, 'suzgecler': {'zmax_m': a.zmax, 'kenar_oran': a.kenar, 'max_w_rad_s': a.max_w, 'her': a.her}, 'kalibrasyon': kal,
+             'sayilar': say, 'suzgecler': {'delik_doldurma': not a.doldurma, 'zmax_m': a.zmax, 'kenar_oran': a.kenar, 'max_w_rad_s': a.max_w, 'her': a.her}, 'kalibrasyon': kal,
              'T_base_renkoptik': [[round(float(v), 6) for v in r] for r in T_b_co],
              'renk_K': Kc.ravel().round(4).tolist(), 'renk_bozulma_giderildi': Dc.round(5).tolist(),
              'derinlik_K': Kd.ravel().round(4).tolist()}
