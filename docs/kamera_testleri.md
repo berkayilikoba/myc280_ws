@@ -100,8 +100,22 @@ yöntemiyle yeniden ölçülmeli: `analiz/zemin_egimi.py`).
 
 ### 4. Yerinde dönüş — `donus_20261013_160413`
 
-360° sola 0.3 rad/s (20.2 s), 360° sağa 0.8 rad/s (8.8 s); derinlik 29.8, renk 28.5 Hz. Henüz analiz edilmedi
-(kayıt robottan Drive'a aktarılıyordu). Analiz: `bag2vlmaps.py` + `vlmaps_dogrula.py` hiza ölçütü dönüş hızına göre.
+360° sola 0.3 rad/s (20.2 s), 360° sağa 0.8 rad/s (8.8 s); derinlik 29.8, renk 28.5 Hz.
+Analiz (14.10): `bag2vlmaps.py --her 2` + `analiz/donus_analiz.py` (hiza ölçütü, kare başına, açısal hıza göre):
+
+| \|w\| (rad/s) | kare | hiza medyan | ≤3 px | renk-derinlik damga farkı |
+|---|---|---|---|---|
+| 0.10–0.45 (~0.3) | 21 | 10.5 px | %40 | 8.3 ms |
+| 0.45–1.20 (~0.8) | 12 | 29.1 px | %21 | 12.1 ms |
+| (turlar, düz + yavaş dönüş) | — | 1.9 px | %76 | — |
+
+- **Dönüş sırasında hiza 5–15× bozuluyor**, hata açısal hızla orantılı (her iki hızda ~73 ms'lik zaman kaymasına denk).
+- Ancak renk damgasına −200..+200 ms ofset aramak (`analiz/gecikme_ara.py`) hatayı düzeltmedi (en iyi −25 ms'de
+  11 px, düzenli minimum yok) → **saf zaman kayması değil**. Olası: Orbbec yumuşak süzgecinin zamansal ortalaması
+  (derinlik hareket sırasında bulaşıyor) ya da bulanıklık — **doğrulanmadı** (`enable_soft_filter:=false` ile dönüş
+  kaydı alınmalı). Örnek az: dönüşte yeterli derinlik kenarı olan ~30 kare.
+- VLMaps için: `bag2vlmaps.py --max_w 0.2` ile dönüş karelerini atın (turda yavaş dönüşte kare kaybı az).
+- D435 ile karşılaştırmada bu test önemli: D435'te derinlik ve renk aynı zaman tabanında, donanım senkronlu.
 
 ### 5. Kapsama turu — `kapsama_20261013_160700` (dikdörtgen 2×1 m + her köşede 360° @0.5 rad/s)
 
@@ -116,4 +130,4 @@ Tüm duvarlar 4 noktadan 360° görüldü (VLMaps için en iyi kapsama). Henüz 
   günde ~2 kamera turuna yetiyor. Drive (rclone ortak istemci kimliği) sık 403 rateLimitExceeded veriyor: kendi
   Google Cloud client ID'si ile çözülür.
 - **Yapılmadı:** HW hizalamalı tur (`depth_registration:=true`; bag2vlmaps artık destekliyor), kamera x ofsetinin
-  ölçümü (duvar testindeki −5 cm), dönüş/kapsama kayıtlarının analizi, gerçek VLMaps (LSeg) haritası.
+  ölçümü (duvar testindeki −5 cm), süzgeç kapalı dönüş testi, kapsama turunun analizi, gerçek VLMaps (LSeg) haritası.
