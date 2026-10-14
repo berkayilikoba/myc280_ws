@@ -43,10 +43,11 @@ def pozlar(yol):
     return out
 
 
-def taramalar(uri):
+def taramalar(uri, konu='/scan'):
+    """Lidar taramaları. /scan_sabit (scan_sabitle.py) aynı ölçümler, 656 noktaya yeniden örneklenmiş: aynı --lidar ofseti."""
     r = rosbag2_py.SequentialReader()
     r.open(rosbag2_py.StorageOptions(uri=uri, storage_id='sqlite3'), rosbag2_py.ConverterOptions('', ''))
-    r.set_filter(rosbag2_py.StorageFilter(topics=['/scan']))
+    r.set_filter(rosbag2_py.StorageFilter(topics=[konu]))
     out = []
     while r.has_next():
         m = deserialize_message(r.read_next()[1], LaserScan)
@@ -119,6 +120,9 @@ def main():
 
     # ---- 3) kamera-lidar ----
     sc = taramalar(a.sensor_bag)
+    if not sc:   # 13.10 kapsama kaydında /scan 0 mesaj (robot içi DDS), /scan_sabit var
+        sc = taramalar(a.sensor_bag, '/scan_sabit')
+        rapor.append('(lidar: /scan boş, /scan_sabit kullanıldı)')
     lx, ly, lyaw = a.lidar[0], a.lidar[1], math.radians(a.lidar[2])
     Tb = np.array([p[:3, 3] for p in Pb])
     yawb = np.array([math.atan2(p[1, 0], p[0, 0]) for p in Pb])

@@ -101,26 +101,29 @@ yöntemiyle yeniden ölçülmeli: `analiz/zemin_egimi.py`).
 ### 4. Yerinde dönüş — `donus_20261013_160413`
 
 360° sola 0.3 rad/s (20.2 s), 360° sağa 0.8 rad/s (8.8 s); derinlik 29.8, renk 28.5 Hz.
-Analiz (14.10): `bag2vlmaps.py --her 2` + `analiz/donus_analiz.py` (hiza ölçütü, kare başına, açısal hıza göre):
-
-| \|w\| (rad/s) | kare | hiza medyan | ≤3 px | renk-derinlik damga farkı |
-|---|---|---|---|---|
-| 0.10–0.45 (~0.3) | 21 | 10.5 px | %40 | 8.3 ms |
-| 0.45–1.20 (~0.8) | 12 | 29.1 px | %21 | 12.1 ms |
-| (turlar, düz + yavaş dönüş) | — | 1.9 px | %76 | — |
-
-- **Dönüş sırasında hiza 5–15× bozuluyor**, hata açısal hızla orantılı (her iki hızda ~73 ms'lik zaman kaymasına denk).
-- Ancak renk damgasına −200..+200 ms ofset aramak (`analiz/gecikme_ara.py`) hatayı düzeltmedi (en iyi −25 ms'de
-  11 px, düzenli minimum yok) → **saf zaman kayması değil**. Olası: Orbbec yumuşak süzgecinin zamansal ortalaması
-  (derinlik hareket sırasında bulaşıyor) ya da bulanıklık — **doğrulanmadı** (`enable_soft_filter:=false` ile dönüş
-  kaydı alınmalı). Örnek az: dönüşte yeterli derinlik kenarı olan ~30 kare.
-- VLMaps için: `bag2vlmaps.py --max_w 0.2` ile dönüş karelerini atın (turda yavaş dönüşte kare kaybı az).
-- D435 ile karşılaştırmada bu test önemli: D435'te derinlik ve renk aynı zaman tabanında, donanım senkronlu.
+Analiz (14.10): `bag2vlmaps.py --her 2` + `analiz/donus_analiz.py` (hiza ölçütü, kare başına, açısal hıza göre).
+Bu kayıtta dönüşte 0.3 rad/s'de 10.5 px, 0.8 rad/s'de 29 px çıktı, ama yalnız ~30 karede ölçülebildi ve renk
+damgasına ofset araması (`analiz/gecikme_ara.py`, −200..+200 ms) düzenli bir minimum vermedi. Kapsama turunda
+(aşağıda, 10× fazla kare) 0.5 rad/s'de hiza yalnız 2.9 px → **dönüş testindeki büyük değerler küçük örnek yanılgısı
+sayılmalı; "dönüşte 5–15× bozulma" sonucu (14.10 ilk yazım) geri alındı.**
 
 ### 5. Kapsama turu — `kapsama_20261013_160700` (dikdörtgen 2×1 m + her köşede 360° @0.5 rad/s)
 
-`kapsama_turu.py`: 136 s, 4.9 GB; derinlik 29.1, renk 25.8 Hz; başlangıca odom farkı 0.5 / 6.6 cm, −0.2°.
-Tüm duvarlar 4 noktadan 360° görüldü (VLMaps için en iyi kapsama). Henüz sahneye dönüştürülmedi.
+`kapsama_turu.py`: 136 s, 4.9 GB; derinlik 29.1, renk 25.8 Hz. Sahne (`--her 2`): 1677 kare, 2.5 GB.
+
+| ölçüt | kapsama turu | 0.15 m/s düz tur |
+|---|---|---|
+| hiza | 1.9 px, ≤3 px %73 | 1.9 px, %76 |
+| zemin | −0.1 cm (−0.6..**+2.9**) | −0.1 cm (−0.6..+1.1) |
+| kamera-lidar <5 cm | **%92** (medyan 0.5 cm) | %88 |
+| başlangıca dönüş, lidar ICP / odom | **9.7 cm, −5.7°** (uyum 0.91) / 6.6 cm, −0.7° | 0.8 cm / 0.7 cm |
+
+Açısal hıza göre hiza (`donus_analiz.py`): <0.05 rad/s 1.91 px (413 kare), 0.2–0.45 1.91 px (128), 0.45–0.7
+2.87 px (151) → dönüşte hafif bozulma.
+
+- Kapsama örtüşmeyi artırıyor (%88 → %92), **ama 4×360° yerinde dönüş odom yönünü ~5° kaydırıyor** ve odom bunu
+  görmüyor: üstten görünümde duvarlar çift. Kapsama turları için lidar/ICP ya da SLAM pozu gerekli (odom yetmez).
+- Bu kayıtta ham `/scan` 0 mesaj (yine robot içi DDS); `/scan_sabit` var, `vlmaps_dogrula.py` artık ona geçiyor.
 
 ## Bilinen sorunlar / sonraki adımlar
 
@@ -130,4 +133,4 @@ Tüm duvarlar 4 noktadan 360° görüldü (VLMaps için en iyi kapsama). Henüz 
   günde ~2 kamera turuna yetiyor. Drive (rclone ortak istemci kimliği) sık 403 rateLimitExceeded veriyor: kendi
   Google Cloud client ID'si ile çözülür.
 - **Yapılmadı:** HW hizalamalı tur (`depth_registration:=true`; bag2vlmaps artık destekliyor), kamera x ofsetinin
-  ölçümü (duvar testindeki −5 cm), süzgeç kapalı dönüş testi, kapsama turunun analizi, gerçek VLMaps (LSeg) haritası.
+  ölçümü (duvar testindeki −5 cm), kapsama turları için lidar/ICP düzeltmeli poz (bag2vlmaps'e), gerçek VLMaps (LSeg) haritası.
