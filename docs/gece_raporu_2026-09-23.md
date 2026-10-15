@@ -89,9 +89,9 @@ donuyor), yalnızca yol geçersizleşince yeniden planlayan BT (fark yok), CostC
 3. Sim lidarı ±120°, gerçek yapılandırma ±100° (sim biraz iyimser).
 4. Gerçek robotta doğrulanmamış olanlar: limo_base sürücüsü (seri port yok), lazer z yüksekliği, taban portu
    `ttyTHS0`/`ttyTHS1`, lidar udev ID'leri, yaw ölü bandının varsayılanının 0 olması (davranış değişikliği).
-5. Upstream `limo_ackerman*.xacro` ve `limo_steering_hinge.xacro` dosyalarında aynı tekerlek kayması duruyor
-   (bizim sim yolu kullanmıyor).
-6. `src/limo_bringup/launch/` altında yanlışlıkla oluşmuş `build/`, `install/`, `log/` dizinleri var (silmedim).
+5. ~~Upstream `limo_ackerman*.xacro` ve `limo_steering_hinge.xacro` dosyalarında aynı tekerlek kayması duruyor
+   (bizim sim yolu kullanmıyor).~~ 9 Ekim 2026: kullanılmayan bu dosyalar depodan kaldırıldı.
+6. ~~`src/limo_bringup/launch/` altında yanlışlıkla oluşmuş `build/`, `install/`, `log/` dizinleri var.~~ Artık yok.
 
 ## Önerim
 

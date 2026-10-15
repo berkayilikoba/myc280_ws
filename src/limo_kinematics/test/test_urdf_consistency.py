@@ -1,9 +1,9 @@
-"""Faz 1 sözleşmesi: üç URDF gerçek robotla aynı geometriyi tanımlamalı.
+"""Faz 1 sözleşmesi: simülasyon URDF'leri gerçek robotla aynı geometriyi tanımlamalı.
 
 Hedef değerler ve kaynakları:
   * dingil mesafesi 0.200, iz 0.172, iç direksiyon sınırı 0.48869 (28°)
       -> limo_base/include/limo_base/limo_driver.h:130-132
-  * tekerlek yarıçapı 0.045 -> üç URDF'te de zaten böyle, Gazebo wheel_diameter 0.09
+  * tekerlek yarıçapı 0.045 -> tüm URDF'lerde zaten böyle, Gazebo wheel_diameter 0.09
   * sensör konumları -> robottaki ROS 1 limo_start.launch (static_transform_publisher)
       laser : 0.105 0 0.08, YAW -0.15  (konumsal argüman sırası x y z yaw pitch roll;
               tf2_echo ile ölçüldü: RPY [0, 0, -0.150])
@@ -26,12 +26,17 @@ from limo_kinematics.kinematics import min_turning_radius_rear_axle, radius_at_o
 
 SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
+# ad -> (xacro dosyası, xacro argümanları). arm_*: limo_sim_nav2'nin yüklediği kollu model.
+ARM_XACRO = os.path.join(SRC, 'limo_description', 'urdf', 'limo_mycobot.xacro')
 ACKERMANN_SOURCES = {
-    'description_ackermann': os.path.join(SRC, 'limo_description', 'urdf', 'limo_ackerman.xacro'),
-    'sim_ackermann': os.path.join(SRC, 'limo_car', 'gazebo', 'ackermann_with_sensor.xacro'),
+    'sim_ackermann': (os.path.join(SRC, 'limo_car', 'gazebo', 'ackermann_with_sensor.xacro'), []),
+    'arm_ackermann': (ARM_XACRO, ['mode:=ackermann']),
 }
-DIFF_SOURCE = os.path.join(SRC, 'limo_description', 'urdf', 'limo_four_diff.xacro')
-ALL_SOURCES = dict(ACKERMANN_SOURCES, description_four_diff=DIFF_SOURCE)
+DIFF_SOURCES = {
+    'description_four_diff': (os.path.join(SRC, 'limo_description', 'urdf', 'limo_four_diff.xacro'), []),
+    'arm_diff': (ARM_XACRO, ['mode:=diff']),
+}
+ALL_SOURCES = dict(ACKERMANN_SOURCES, **DIFF_SOURCES)
 
 L, T, INNER, WHEEL_R = 0.200, 0.172, 0.48869, 0.045
 TOL = 1e-4
@@ -46,9 +51,9 @@ pytestmark = pytest.mark.skipif(shutil.which('xacro') is None,
                                 reason='xacro yok — ROS ortamını source edin')
 
 
-def _expand(src, tmp_path_factory):
-    out = tmp_path_factory.mktemp('urdf') / (os.path.basename(src) + '.urdf')
-    res = subprocess.run(['xacro', src], capture_output=True, text=True)
+def _expand(name, src, args, tmp_path_factory):
+    out = tmp_path_factory.mktemp('urdf') / (name + '.urdf')
+    res = subprocess.run(['xacro', src, *args], capture_output=True, text=True)
     assert res.returncode == 0, f'xacro başarısız: {src}\n{res.stderr}'
     out.write_text(res.stdout)
     return str(out)
@@ -56,7 +61,7 @@ def _expand(src, tmp_path_factory):
 
 @pytest.fixture(scope='module')
 def urdfs(tmp_path_factory):
-    return {k: _expand(v, tmp_path_factory) for k, v in ALL_SOURCES.items()}
+    return {k: _expand(k, src, args, tmp_path_factory) for k, (src, args) in ALL_SOURCES.items()}
 
 
 def _root(path):
@@ -87,7 +92,7 @@ def test_ackermann_geometry_matches_driver(urdfs, name):
     assert g.rear_axle_x == pytest.approx(-L / 2, abs=TOL), name
 
 
-def test_all_ackermann_models_agree_on_turning_radius(urdfs):
+def test_ackermann_models_match_theoretical_turning_radius(urdfs):
     radii = []
     for name in ACKERMANN_SOURCES:
         g = load_geometry(urdfs[name])
@@ -97,8 +102,9 @@ def test_all_ackermann_models_agree_on_turning_radius(urdfs):
     assert radii == pytest.approx([0.47282] * len(radii), abs=1e-3)
 
 
-def test_four_diff_wheel_positions(urdfs):
-    root = _root(urdfs['description_four_diff'])
+@pytest.mark.parametrize('name', sorted(DIFF_SOURCES))
+def test_four_diff_wheel_positions(urdfs, name):
+    root = _root(urdfs[name])
     wheels = [j for j in root.findall('joint') if j.get('type') == 'continuous']
     assert len(wheels) == 4
     xs = sorted(round(_floats(j.find('origin').get('xyz'))[0], 4) for j in wheels)
@@ -138,8 +144,9 @@ def test_gazebo_references_point_to_existing_links(urdfs, name):
 
 # ---------------------------------------------------------------- Gazebo eklentisi
 
-def test_sim_ackermann_plugin_matches_driver(urdfs):
-    xml = open(urdfs['sim_ackermann']).read()
+@pytest.mark.parametrize('name', sorted(ACKERMANN_SOURCES))
+def test_sim_ackermann_plugin_matches_driver(urdfs, name):
+    xml = open(urdfs[name]).read()
     root = ET.fromstring(xml)
     plugin = next(p for p in root.iter('plugin') if 'ackermann_drive' in (p.get('filename') or ''))
     assert float(plugin.find('max_steer').text) == pytest.approx(INNER, abs=TOL)

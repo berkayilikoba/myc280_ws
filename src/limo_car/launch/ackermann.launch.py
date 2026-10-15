@@ -1,9 +1,10 @@
 # Autor: Zhui Li
 # E-Mail: lz554113510@gmail.com
-# Company: Institut für Intermodale Transport- und Logistiksysteme in Technische Universität Braunschweig
+# Company: Institut für Intermodale Transport- und Logistiksysteme,
+#          Technische Universität Braunschweig
 # Description: Diese py-Datei basiert auf Regeln und definiert Funktionen durch python,
-# um den Launch der Simulation in Gazebo zu ermöglichen. Danach mit der Simulation in Gazebo kann man die weitere
-# Forschung arbeiten. Diese Launch-Datei dient zu Ackermann-Type.
+# um den Launch der Simulation in Gazebo zu ermöglichen. Danach mit der Simulation in Gazebo
+# kann man die weitere Forschung arbeiten. Diese Launch-Datei dient zu Ackermann-Type.
 
 import os
 
@@ -29,7 +30,7 @@ def generate_launch_description():
 
     # Erstellt ein robot_state_publisher Node
     params = {'robot_description': robot_description_config.toxml(),
-            'use_sim_time': use_sim_time}
+              'use_sim_time': use_sim_time}
     node_robot_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',

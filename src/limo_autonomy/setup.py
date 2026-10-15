@@ -19,7 +19,7 @@ setup(
     maintainer='gunes',
     description='LIMO otonom gorev katmani',
     license='MIT',
-    tests_require=['pytest'],
+    extras_require={'test': ['pytest']},
     entry_points={'console_scripts': [
         'patrol = limo_autonomy.patrol_node:main',
     ]},

@@ -15,7 +15,7 @@ setup(
     maintainer='gunes',
     description='LIMO kinematik hesaplari (URDF -> Nav2)',
     license='MIT',
-    tests_require=['pytest'],
+    extras_require={'test': ['pytest']},
     entry_points={'console_scripts': [
         'limo_kinematics = limo_kinematics.cli:main',
         'ackermann_cmd_adapter = limo_kinematics.ackermann_cmd_adapter:main',

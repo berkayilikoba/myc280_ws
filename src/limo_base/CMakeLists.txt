@@ -24,22 +24,10 @@ find_package(sensor_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(limo_msgs REQUIRED)
-find_package(tf2_geometry_msgs)
-find_package(turtlesim)
+find_package(tf2_geometry_msgs REQUIRED)
 
 include_directories(
   include
-)
-
-set(DEPENDENCIES
-  "geometry_msgs"
-  "nav_msgs"
-  "rclcpp"
-  "std_msgs"
-  "tf2"
-  "tf2_ros"
-  "limo_msgs"
-  "sensor_msgs"
 )
 
 # ROS'tan bağımsız kinematik hesaplar — birim testi için ayrı kütüphane.
@@ -50,19 +38,9 @@ add_executable(limo_base
     src/limo_base_node.cpp
     src/limo_driver.cpp
     src/serial_port.cpp)
-ament_target_dependencies(limo_base  rclcpp std_msgs tf2 tf2_ros nav_msgs sensor_msgs limo_msgs tf2_geometry_msgs )
+ament_target_dependencies(limo_base rclcpp std_msgs geometry_msgs tf2 tf2_ros nav_msgs sensor_msgs limo_msgs tf2_geometry_msgs)
 target_link_libraries(limo_base limo_kinematics)
 
-
-add_executable(tf_pub src/tf_pub.cpp)
-ament_target_dependencies(
-    tf_pub
-    geometry_msgs
-    rclcpp
-    tf2
-    tf2_ros
-    turtlesim
-)
 
 install(
   DIRECTORY include/
@@ -73,13 +51,6 @@ install(TARGETS
   limo_base  
   DESTINATION lib/${PROJECT_NAME})
 
-  install(TARGETS  
-  tf_pub  
-  DESTINATION lib/${PROJECT_NAME})
-
-install(DIRECTORY launch src 
-  DESTINATION share/${PROJECT_NAME}/)
-  
 ament_export_include_directories(
   include
 )
