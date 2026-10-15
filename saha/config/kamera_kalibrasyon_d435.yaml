@@ -1,0 +1,14 @@
+# LIMO + Intel RealSense D435 (USB 8086:0b07): kamera dış kalibrasyonu. 14.10.2026, Dabai yerine takıldı.
+# RealSense sürücüsü camera_link -> camera_{depth,color}_frame -> *_optical_frame zincirini yayınlar
+# (camera_link = derinlik / sol IR sensörü). base_link -> camera_link bu dosyadan (ortam.sh kamera_tf_yayinla).
+
+base_link_to_camera_link:
+  parent: base_link
+  child: camera_link
+  translation_m: [0.084, 0.0, 0.028]
+  rotation_rpy_rad: [0.0015, -0.0191, 0.0]   # roll +0.09°, pitch -1.09°, yaw 0
+  kaynak:
+    x, y: "Dabai ile aynı yuva (AgileX URDF 0.084, 0) — ölçülmedi"
+    z, roll, pitch: "zemin_egimi.py, 14.10 d435_kalib_20261014_154443 (37 kare, düzlem RMS 2.1 mm): optik merkez
+           yerden 17.8 cm (IQR 17.8-17.9), pitch -1.09° (IQR -1.11..-1.08), roll +0.09° (IQR +0.07..+0.10)"
+    yaw: "0 varsayıldı; tur kaydında vlmaps_dogrula.py kamera-lidar yaw aramasıyla kontrol edilecek"
