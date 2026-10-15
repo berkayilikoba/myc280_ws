@@ -93,7 +93,8 @@ def generate_launch_description():
     declare_kol_kilit_cmd = DeclareLaunchArgument(
         name='kol_kilit',
         default_value='true',
-        description='true: myCobot eklemleri fixed (simde kolu tutan kontrolcü yok, yoksa kol çöküp lidarı kapatır)'
+        description='true: myCobot eklemleri fixed '
+                    '(simde kolu tutan kontrolcü yok, yoksa kol çöküp lidarı kapatır)'
     )
 
     declare_rviz_config_file_cmd = DeclareLaunchArgument(
@@ -148,7 +149,8 @@ def generate_launch_description():
             # xacro'nun taşıdığı bir XML yorumundaki 'kelime:' bile launch'ı düşürür
             # ("mapping values are not allowed here"). display_*.launch.py'ler de böyle.
             'robot_description': ParameterValue(
-                Command(['xacro ', urdf_model, ' mode:=', mode, ' kol_kilit:=', kol_kilit]), value_type=str),
+                Command(['xacro ', urdf_model, ' mode:=', mode, ' kol_kilit:=', kol_kilit]),
+                value_type=str),
             'use_sim_time': use_sim_time
         }]
     )
@@ -244,8 +246,9 @@ def generate_launch_description():
         package='limo_kinematics', executable='ackermann_cmd_adapter',
         name='ackermann_cmd_adapter', output='screen',
         parameters=[{'use_sim_time': use_sim_time}]))
-    # Diff: planar_move komutu anında uygular, gerçek taban ise gecikmeli/ağır tepki verir. Taban modeli
-    # /cmd_vel'i ölçülmüş tepkiyle cmd_vel_taban'a çevirir (limo_kinematics/taban_modeli.py).
+    # Diff: planar_move komutu anında uygular, gerçek taban ise gecikmeli/ağır tepki verir.
+    # Taban modeli /cmd_vel'i ölçülmüş tepkiyle cmd_vel_taban'a çevirir
+    # (limo_kinematics/taban_modeli.py).
     ld.add_action(Node(
         condition=IfCondition(PythonExpression(["'", mode, "' != 'ackermann'"])),
         package='limo_kinematics', executable='taban_modeli',

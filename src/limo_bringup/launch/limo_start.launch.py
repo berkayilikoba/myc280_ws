@@ -90,8 +90,8 @@ def generate_launch_description():
             parameters=[ydlidar_params, {'use_sim_time': use_sim_time}]),
 
         # ---------------- Sensör dönüşümleri ----------------
-        # Değerler robottaki ROS 1 limo_start.launch'tan. URDF'teki karşılıkları
-        # farklı (laser z = -0.034, yaw kalibrasyonu yok) — sahada kalibre edilmiş olan bu.
+        # Lidar robottaki ROS 1 limo_start.launch'tan (sahada kalibre edilmiş olan bu).
+        # Kamera resmi AgileX URDF değeri, URDF ile aynı (saha/config/kamera_kalibrasyon.yaml).
 
         Node(
             package='tf2_ros',
@@ -111,7 +111,7 @@ def generate_launch_description():
             package='tf2_ros',
             executable='static_transform_publisher',
             name='base_link_to_camera_link',
-            arguments=['--x', '0.105', '--z', '0.1',
+            arguments=['--x', '0.084', '--z', '0.03',
                        '--frame-id', 'base_link', '--child-frame-id', 'camera_link']),
 
         # ---------------- Odometri füzyonu ----------------

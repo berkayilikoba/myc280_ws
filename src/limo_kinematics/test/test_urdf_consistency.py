@@ -7,8 +7,9 @@ Hedef değerler ve kaynakları:
   * sensör konumları -> robottaki ROS 1 limo_start.launch (static_transform_publisher)
       laser : 0.105 0 0.08, YAW -0.15  (konumsal argüman sırası x y z yaw pitch roll;
               tf2_echo ile ölçüldü: RPY [0, 0, -0.150])
-      camera: 0.105 0 0.1   (çerçeve adı camera_link — kamera sürücülerinin kök çerçevesi)
       imu   : 0 0 0
+  * kamera -> resmi AgileX URDF'i (limo_ros1 limo_description): 0.084 0 0.03, eğimsiz; 09.10.2026
+      sahada doğrulandı (saha/config/kamera_kalibrasyon.yaml). Çerçeve adı camera_link.
 
 Bu testler xacro'yu çalıştırır; ROS ortamı ve workspace source edilmiş olmalı.
 """
@@ -43,7 +44,7 @@ TOL = 1e-4
 
 SENSORS = {
     'laser_link': ((0.105, 0.0, 0.08), (0.0, 0.0, -0.15)),
-    'camera_link': ((0.105, 0.0, 0.1), (0.0, 0.0, 0.0)),
+    'camera_link': ((0.084, 0.0, 0.03), (0.0, 0.0, 0.0)),
     'imu_link': ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
 }
 
