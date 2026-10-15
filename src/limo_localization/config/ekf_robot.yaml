@@ -1,0 +1,72 @@
+# robot_localization EKF — gerçek LIMO: enkoder (/odom) + taban kartı IMU'su (/imu)
+#
+# Gerçek robotta limo_base pub_odom_tf:=false ile çalışmalı: odom -> base_link'i bu düğüm yayınlar.
+# Bag üzerinde: ros2 launch limo_localization ekf.launch.py bag:=true (TF yayınlamaz, bkz. launch).
+#
+# Konu seçimi bags/LIMO_2026-10-09_* kayıtlarına göre (2 m x 1 m dikdörtgen, toplam 360° dönüş):
+#
+#   konu       çerçeve                 hız    360° turda ∫wz dt   yaw(son - ilk)
+#   /odom      odom -> base_link       50 Hz  386-396°            331-333°   <- açı bilgisi tutarsız
+#   /imu       imu_link                100 Hz 358-362°            359-361°   <- ∫gyro = yaw, tutarlı
+#   /odom_duz  odom -> base_link       50 Hz  (vx = /odom vx, açı = /imu yaw; türetilmiş konu)
+#
+# * /odom: yalnızca vx ve vy (=0, kaymayan taban kısıtı). wz ve yaw kullanılmaz.
+#   Twist kovaryansı sürücüde 0; robot_localization bunu çok küçük bir değere çeker. Her
+#   durum değişkenini tek sensör ölçtüğü için kestirimi değil yalnızca çıkış kovaryansını etkiler.
+# * /imu: yaw + vyaw. IMU yaw'ı jiroskop integraliyle birebir aynı (manyetometre yok, sapma
+#   yalnızca jiro biası: duruşta ~1.7e-4 rad/s). Mutlak yaw, kamera açıkken /imu'daki 0.2 s'lik
+#   boşluklarda dönüş kaybını önler. relative: ilk ölçüm 0 kabul edilir, EKF yönü 0'dan başlar.
+#   İvme kullanılmaz: duruşta ax/ay ~ -0.15/-0.11 m/s² bias (eğim/kalibrasyon).
+# * /odom_duz füzyona girmez: /odom vx'i ve /imu yaw'ından türetildiği için aynı ölçümü iki kez
+#   saymak olur. Karşılaştırma referansı olarak kullanılabilir (EKF çıkışı ona çok yakın olmalı).
+# * Bag'lerde base_link -> imu_link TF'i yok; gerçek robotta limo_bringup/limo_start.launch.py
+#   birim dönüşüm olarak yayınlıyor, bag modunda ekf.launch.py ekliyor.
+#
+# Bilinen sınır: IMU ölçeği/biası EKF ile düzeltilemez. Lidar ICP'ye göre odom ile sürülen turda
+# başlangıca dönüş hatası 4.9 cm, -3.3° (dikdortgen_odom_20261009_121054). Bu EKF ile sürülen
+# turlarda (15.10.2026, `donus_hatasi`): 5.2 cm, +0.73° ve 10.3 cm, +0.61°. Yön hatası <1°, kalan
+# hata enkoder mesafe ölçeği/yanal kayma (6 m yolda ~%1-2).
+
+ekf_filter_node:
+  ros__parameters:
+    frequency: 30.0
+    sensor_timeout: 0.1
+    two_d_mode: true            # z, roll, pitch kilitli — LIMO düzlemde hareket eder
+    transform_time_offset: 0.0
+    transform_timeout: 0.0
+    print_diagnostics: true
+    debug: false
+    publish_acceleration: false
+    publish_tf: true
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+
+    # Sıra: x, y, z | roll, pitch, yaw | vx, vy, vz | vroll, vpitch, vyaw | ax, ay, az
+
+    odom0: odom
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, false,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_nodelay: true
+    odom0_differential: false
+    odom0_relative: false
+
+    imu0: imu
+    imu0_config: [false, false, false,
+                  false, false, true,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_nodelay: true
+    imu0_differential: false
+    imu0_relative: true
+    imu0_queue_size: 20         # 100 Hz, odom'un iki katı
+    imu0_remove_gravitational_acceleration: true
+
+    # process_noise_covariance verilmedi: robot_localization varsayılanları kullanılır.

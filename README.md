@@ -12,6 +12,7 @@ AgileX LIMO için ROS 2 Humble + Nav2 yığını, Gazebo 11 simülasyonu, otonom
 | `limo_description`, `limo_car`, `mycobot_description` | URDF/xacro, Gazebo modelleri ve dünyalar |
 | `limo_kinematics` | Ackermann/diff geometri ve kinematik hesapları, sim için `ackermann_cmd_adapter` + testler |
 | `limo_autonomy` | Görev planlayıcı + `patrol` düğümü (waypoint devriyesi, yeniden deneme, eve dönüş) + testler |
+| `limo_localization` | robot_localization EKF, RTAB-Map RGB-D görsel odometri, odometri ölçümü için `drive_pattern` + testler |
 
 ## Kurulum (Ubuntu 22.04, ROS 2 Humble)
 
@@ -21,6 +22,15 @@ sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-slam-
 cd limo_ws && rosdep install --from-paths src --ignore-src -y
 colcon build --symlink-install && source install/setup.bash
 ```
+
+## Testler
+
+```bash
+colcon test && colcon test-result --verbose
+```
+
+gtest (`limo_base` kinematiği), pytest (`limo_kinematics`, `limo_autonomy`, `limo_localization`; URDF testleri
+`xacro` ister, workspace source edilmiş olmalı) ve ament lint testleri.
 
 ## Simülasyon
 
