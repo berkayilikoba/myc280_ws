@@ -189,6 +189,30 @@ def derinlik_hizala(dmm, Kd, Kc, T_c_d, boyut, zmin=0.2, zmax=8.0, doldur=True):
     return out
 
 
+def egim_suz(dmm, K, aci_max):
+    """Yatık dikey yüzey süzgeci: yüzey normali ile görüş ışını arasındaki açı > aci_max (derece) olan pikselleri sıfırla.
+    Stereo/yapılandırılmış ışık derinlik hatası yatık açıda büyür (D435 uzun duvarı 0.5-1 m taşırıyordu, 21.10)."""
+    z = dmm.astype(np.float32) / 1000.0
+    H, W = z.shape
+    u, v = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
+    P = np.stack([(u - K[0, 2]) * z / K[0, 0], (v - K[1, 2]) * z / K[1, 1], z], -1)
+    dx = np.zeros_like(P)
+    dy = np.zeros_like(P)
+    dx[:, 1:-1] = P[:, 2:] - P[:, :-2]
+    dy[1:-1] = P[2:] - P[:-2]
+    n = np.cross(dx, dy)
+    nn = np.linalg.norm(n, axis=-1) * np.linalg.norm(P, axis=-1)
+    cos = np.abs((n * P).sum(-1)) / np.maximum(nn, 1e-9)
+    gecerli = (z > 0) & np.roll(z > 0, 1, 0) & np.roll(z > 0, -1, 0) & np.roll(z > 0, 1, 1) & np.roll(z > 0, -1, 1)
+    # yalnız dikey yüzeyler (normal ~yatay: optik y = aşağı bileşeni küçük); zemin kamera 18 cm yüksekte olduğundan
+    # her zaman yatık görünür ve VLMaps için gerekli (zemin etiketi, engel haritası) -> süzülmez
+    dikey = np.abs(n[..., 1]) < 0.5 * np.linalg.norm(n, axis=-1)
+    kotu = gecerli & dikey & (cos < np.cos(np.radians(aci_max)))
+    out = dmm.copy()
+    out[kotu] = 0
+    return out
+
+
 def kenar_suz(dmm, oran):
     """Uçan piksel: 3x3 komşulukta (geçerli komşular) derinlik farkı > oran*z olan pikseli sıfırla."""
     z = dmm.astype(np.float32)
@@ -219,6 +243,8 @@ def main():
     ap.add_argument('--poz_dosyasi', help='gövde pozu CSV (t,x,y,yaw): lidar_poz.py çıktısı; yoksa /odom_duz')
     ap.add_argument('--doldurma', action='store_true',
                     help='izdüşüm deliklerini doldurma (14.10 öncesi davranış; D435\'te derinlik seyrek kalır)')
+    ap.add_argument('--egim_max', type=float, default=0.0,
+                    help='yüzey normali-görüş ışını açısı bundan büyük pikselleri at (derece, 0=kapalı; ör. 70)')
     ap.add_argument('--max_w', type=float, default=0.0,
                     help='gövde açısal hızı bundan büyükse (rad/s) kareyi atla (bulanıklık/eşleme hatası; 0=kapalı)')
     a = ap.parse_args()
@@ -280,6 +306,8 @@ def main():
         dmm = derin[j][1]
         if a.kenar > 0:
             dmm = kenar_suz(dmm, a.kenar)
+        if a.egim_max > 0:
+            dmm = egim_suz(dmm, Kd, a.egim_max)
         dep = derinlik_hizala(dmm, Kd, Kc, T_c_d, (Hc, Wc), zmax=a.zmax, doldur=not a.doldurma)
         cv2.imwrite(os.path.join(a.cikti, 'rgb', f'{n:06d}.png'), rgb)
         np.save(os.path.join(a.cikti, 'depth', f'{n:06d}.npy'), dep)
@@ -307,7 +335,7 @@ def main():
         yaml.safe_dump(cfg, f, sort_keys=False, default_flow_style=None)
     bilgi = {'kaynak': {'kamera_bag': os.path.abspath(a.kamera_bag), 'sensor_bag': os.path.abspath(a.sensor_bag)},
              'dunya_cercevesi': 'odom (robot açılışındaki konum), z yukarı, z=0 zemin; poses.txt = base_footprint', 'poz_kaynagi': a.poz_dosyasi or '/odom_duz',
-             'sayilar': say, 'suzgecler': {'delik_doldurma': not a.doldurma, 'zmax_m': a.zmax, 'kenar_oran': a.kenar, 'max_w_rad_s': a.max_w, 'her': a.her}, 'kalibrasyon': kal,
+             'sayilar': say, 'suzgecler': {'delik_doldurma': not a.doldurma, 'egim_max_deg': a.egim_max, 'zmax_m': a.zmax, 'kenar_oran': a.kenar, 'max_w_rad_s': a.max_w, 'her': a.her}, 'kalibrasyon': kal,
              'T_base_renkoptik': [[round(float(v), 6) for v in r] for r in T_b_co],
              'renk_K': Kc.ravel().round(4).tolist(), 'renk_bozulma_giderildi': Dc.round(5).tolist(),
              'derinlik_K': Kd.ravel().round(4).tolist()}
