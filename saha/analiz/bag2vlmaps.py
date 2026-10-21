@@ -216,6 +216,7 @@ def main():
                     help='bundan uzak derinliği at (m). Dabai σ: 1-2 m 4 mm, 2-4 m 28 mm, 4-8 m 89 mm (13.10)')
     ap.add_argument('--kenar', type=float, default=0.0,
                     help='uçan piksel süzgeci: 3x3 komşulukta derinlik farkı > kenar*z olan pikselleri at (0=kapalı)')
+    ap.add_argument('--poz_dosyasi', help='gövde pozu CSV (t,x,y,yaw): lidar_poz.py çıktısı; yoksa /odom_duz')
     ap.add_argument('--doldurma', action='store_true',
                     help='izdüşüm deliklerini doldurma (14.10 öncesi davranış; D435\'te derinlik seyrek kalır)')
     ap.add_argument('--max_w', type=float, default=0.0,
@@ -224,6 +225,9 @@ def main():
 
     kal = yaml.safe_load(open(a.kalib))['base_link_to_camera_link']
     O, tfs, ci = sensor_oku(a.sensor_bag)
+    if a.poz_dosyasi:   # lidar ile düzeltilmiş poz (lidar_poz.py): dünya = harita çerçevesi
+        O = np.loadtxt(a.poz_dosyasi, delimiter=',', comments='#')[:, :4]
+        O[:, 3] = np.unwrap(O[:, 3])
     T_b_cl = kamera_dis(tfs, a.kalib)
     T_b_cl[2, 3] += a.taban_z           # base_link -> base_footprint: dünya z = 0 zemin (poses.txt z = 0)
     T_cl_co = zincir(tfs, 'camera_link', 'camera_depth_frame', 'camera_color_frame', 'camera_color_optical_frame')
@@ -302,7 +306,7 @@ def main():
                 '# VLMaps kodunda denenmedi: eksen ayarlarını ilk sahnede doğrulayın.\n')
         yaml.safe_dump(cfg, f, sort_keys=False, default_flow_style=None)
     bilgi = {'kaynak': {'kamera_bag': os.path.abspath(a.kamera_bag), 'sensor_bag': os.path.abspath(a.sensor_bag)},
-             'dunya_cercevesi': 'odom (robot açılışındaki konum), z yukarı, z=0 zemin; poses.txt = base_footprint', 'poz_kaynagi': '/odom_duz',
+             'dunya_cercevesi': 'odom (robot açılışındaki konum), z yukarı, z=0 zemin; poses.txt = base_footprint', 'poz_kaynagi': a.poz_dosyasi or '/odom_duz',
              'sayilar': say, 'suzgecler': {'delik_doldurma': not a.doldurma, 'zmax_m': a.zmax, 'kenar_oran': a.kenar, 'max_w_rad_s': a.max_w, 'her': a.her}, 'kalibrasyon': kal,
              'T_base_renkoptik': [[round(float(v), 6) for v in r] for r in T_b_co],
              'renk_K': Kc.ravel().round(4).tolist(), 'renk_bozulma_giderildi': Dc.round(5).tolist(),
