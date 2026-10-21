@@ -112,6 +112,10 @@ def main():
                 cv2.rectangle(b, (5, 5 + 16 * k), (17, 17 + 16 * k), RENK[k % len(RENK)], -1)
                 cv2.putText(b, n, (22, 16 + 16 * k), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
         cv2.imwrite(str(cikti / ad), b)
+    # kuşbakışı etiket + dünya (ROS, harita çerçevesi) koordinatları: hücre (r, c) -> x = X_h, y = -Z_h
+    pmin, cs = np.asarray(vm.pcd_min, float), 0.05
+    np.savez_compressed(cikti / 'kusbakisi.npz', etiket=lab2, adlar=np.array(adlar),
+                        x0=pmin[0] + r0 * cs, y0=-(pmin[2] + c0 * cs), cs=cs)   # x = x0 + r*cs, y = y0 - c*cs
     sayim = {n: int((etiket == k).sum()) for k, n in enumerate(adlar)}
     ozet = {'sahne': str(sahne), 'hucre_sayisi': int(len(gp)), 'hucre_m': 0.05,
             'kapsama_m2_kusbakisi': round(float((lab2 >= 0).sum()) * 0.0025, 2),
