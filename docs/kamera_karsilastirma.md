@@ -150,6 +150,47 @@ masa, dolap, raf, kutu, pencere, çöp kutusu, robot) + diğer.
   duvarı geniş görüş alanıyla yatık açıdan görürken stereo derinlik hatası büyüyor (duvar testi: 2 m'de σ 30 mm,
   düzlem RMS 56 mm). Zemin oranının düşüklüğü de bu taşmadan.
 
+### 8.1 D435 neden geride? (21.10, olası nedenlerin tek tek sınanması)
+
+Duvar kesinliği (VLMaps "wall" hücrelerinin <10 cm'inde lidar haritası duvarı olan oranı), aynı kapsama turları:
+
+| deney | Dabai | D435 | sonuç |
+|---|---|---|---|
+| temel (derinlik ≤ 3 m) | 0.42 | 0.24 | |
+| derinlik ≤ 2 m | 0.53 | 0.31 | ikisi de iyileşir, fark kalır |
+| dönüş kareleri atıldı (≤ 0.2 rad/s) | 0.63 | 0.35 | **hızlı dönüş ana neden değil** |
+| D435 yatık dikey yüzey süzgeci (70°) | — | 0.25 | etkisiz |
+| kuşbakışı yalnız ≤ 1 m yükseklik | 0.41 | 0.26 | yüksek/uzak noktalar neden değil |
+
+- Derinlik geometrisi D435'te iyi: 10–50 cm bandı haritaya Dabai'den iyi oturuyor (medyan 4.9 vs 5.6 cm, <10 cm %80 vs %74).
+- Fark **etiketlerde**: D435 haritasında zemin %15, Dabai'de %40; zemin hücreleri "duvar" etiketi alıyor. Etiketler renk
+  görüntüsünden (LSeg). D435 renk görüntüsü durağanken bile ~3× az keskin (Laplace varyansı 134 vs 378):
+  1920×1080 sensörden 640×480 istendiği için ayrıntı kaybı olabilir — **doğrulanmadı**; sonraki robot oturumunda
+  D435 renk 1280×720 ile kaydedilip denenmeli.
+- Bizden kaynaklı olabilecekler (robotla yapılacak): D435 renk çözünürlüğü, derinlik 848×480 + High Accuracy ön
+  ayarı + süzgeçler (`D435_AYAR=vlmaps kamera_baslat.sh`), dönüşler ≤ 0.2 rad/s.
+
+### 8.2 Kamera konumu kalibrasyonu (haritaya göre, `kalib_harita.py`)
+
+Derinlik noktalarını haritadaki duvarlara en iyi oturtan gövde-kamera düzeltmesi (5 cm hücre haritası):
+
+| | düzeltmesiz ort. uzaklık | en iyi düzeltme | düzeltmeli |
+|---|---|---|---|
+| Dabai | 7.5 cm | dx **+9 cm** (ızgara sınırında), dy −1 cm, dyaw −1.0° | 4.8 cm |
+| D435 | 6.6 cm | dx **+7 cm**, dy +1 cm, dyaw −0.5° | 5.3 cm |
+
+İki kamera da noktaların 7–9 cm ileri kaymasını istiyor (duvar testinde de ikisi lidara göre yakın gösteriyordu) →
+ortak neden büyük olasılıkla lidar x ofseti (0.137 m) ya da iki kamerada da görülen derinlik ölçek hatası (~−4 cm/m);
+yöntem kamera konumu ile ölçek hatasını ayıramıyor. "D435 konumu Dabai'den ~4.5 cm farklı" tahmini bu veriyle
+**desteklenmiyor**. Kalibrasyon dosyası değiştirilmedi; **lidar ve kamera konumu metreyle ölçülmeli** (sonraki oturum).
+
+## 9. Dil ile hedef (VLMaps → Nav2) — `vlmaps_hedef.py`
+
+Dabai kapsama haritasında: door → nesne (+5.17, +0.97) hedef (+5.77, +0.87, 170°); chair → (+1.94, +1.99) hedef
+(+2.42, +2.37, −141°); table → (+0.36, +1.44) hedef (+0.07, +0.92, 60°); cabinet → (+3.87, +2.09) hedef (+4.17,
++1.57, 119°); "trash can" bulunamadı. Konumlar odanın düzeniyle tutarlı (masa/sandalye sırası başlangıcın solunda,
+kapı uzak uçta, koridora açılan boşlukta). Hedefler engelden ≥ 0.3 m serbest hücrelerde; Nav2'ye verilebilir.
+
 ## Özet (VLMaps açısından)
 
 | konu | daha iyi | not |
@@ -161,11 +202,17 @@ masa, dolap, raf, kutu, pencere, çöp kutusu, robot) + diğer.
 | Uçan piksel | **Dabai** (12× az) | D435 stereo kenar gürültüsü |
 | VLMaps sahne ölçütleri (düz tur) | eşit | hiza 1.9 px, örtüşme %88, zemin ±1 cm |
 | Kapsama turunda örtüşme | **D435** (%94 vs %92) | geniş görüş alanı |
-| Dönüşte hiza | **Dabai** | D435 0.5 rad/s'de 13 px (bulanıklık), Dabai 2.9 px |
+| Dönüşte hiza | **Dabai** | D435 0.5 rad/s'de 10–13 px (bulanıklık), 0.2 rad/s'de 2.9 px; Dabai 2.9 px |
+| VLMaps duvar kesinliği | **Dabai** | 0.42–0.63 vs 0.24–0.35 (tüm deneylerde); fark etiketlerde (renk), geometride değil |
+| VLMaps kapsama | **D435** | 28 vs 24 m² (geniş görüş alanı) |
+| Poz kaynağı | — | iki kamerada da lidar_poz şart (kapsama turunda odom ~6–9° kayıyor) |
 | Jetson yükü / donanım hizası | **Dabai** | D435 sürücü hizası Jetson'da 20 Hz, kullanılamaz |
 | Kurulum | **Dabai** | D435 USB 3 şart; izdüşüm deliği doldurma gerekli (bag2vlmaps artık yapıyor) |
 
-**Öneri:** VLMaps için iki kamera da kullanılabilir; D435 ile (1) `bag2vlmaps.py --max_w 0.2` ya da yavaş dönüş,
+**Öneri (21.10 güncel):** Bugünkü verilerle VLMaps için **Dabai daha temiz harita veriyor**; D435'in derinlik
+geometrisi iyi ama renk tabanlı etiketleri zayıf. D435'i adil sınamak için sonraki oturumda: renk 1280×720,
+derinlik 848×480 + High Accuracy + süzgeçler, dönüş ≤ 0.2 rad/s, lidar_poz ile poz. Önceki öneri:
+VLMaps için iki kamera da kullanılabilir; D435 ile (1) `bag2vlmaps.py --max_w 0.2` ya da yavaş dönüş,
 (2) derinlik ~2 m ile sınırla (`--zmax 2.0`), (3) uzamsal+zamansal süzgeç açık. Kısa pozlama denemesi
 (`donus_kisapoz_*`, `kapsama_kisapoz_*`: rgb exposure 5 ms, gain 128) kaydedildi, analizi bekliyor.
 Her iki günde de kapsama turundaki 4×360° dönüş odom yönünü ~6° kaydırıyor → VLMaps için lidar/SLAM pozu gerekli.

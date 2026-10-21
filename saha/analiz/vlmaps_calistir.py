@@ -41,17 +41,32 @@ def R2q(R):
     return x, y, z, w
 
 
-def hazirla(sahne, veri):
+def hazirla(sahne, veri, max_w=0.0):
+    """rgb/depth bağları + Habitat eksenli poses.txt. max_w > 0: gövde açısal hızı (poses.txt yaw farkı / zaman.txt)
+    bundan büyük kareleri dışarıda bırak (D435 dönüşte bulanık, renk-derinlik kayık)."""
     veri.mkdir(parents=True, exist_ok=True)
-    for alt in ('rgb', 'depth'):
-        hedef = veri / alt
-        if not hedef.exists():
-            hedef.symlink_to((sahne / alt).resolve())
+    P = np.loadtxt(sahne / 'poses_kamera.txt')
+    sec = np.ones(len(P), bool)
+    if max_w > 0:
+        B = np.loadtxt(sahne / 'poses.txt')
+        t = np.loadtxt(sahne / 'zaman.txt')[:, 1]
+        yaw = np.unwrap([np.arctan2(2 * (q[3] * q[2] + q[0] * q[1]), 1 - 2 * (q[1] ** 2 + q[2] ** 2)) for q in B[:, 3:]])
+        sec = np.abs(np.gradient(yaw, t)) <= max_w
     Rh = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], float)   # ROS (z yukarı) -> Habitat (y yukarı)
+    for alt in ('rgb', 'depth'):
+        (veri / alt).mkdir(exist_ok=True)
+    uz = {'rgb': 'png', 'depth': 'npy'}
     with open(veri / 'poses.txt', 'w') as f:
-        for satir in np.loadtxt(sahne / 'poses_kamera.txt'):
-            p, R = satir[:3], q2R(*satir[3:])
+        n = 0
+        for i in np.nonzero(sec)[0]:
+            for alt in ('rgb', 'depth'):
+                hedef = veri / alt / f'{n:06d}.{uz[alt]}'
+                if not hedef.exists():
+                    hedef.symlink_to((sahne / alt / f'{i:06d}.{uz[alt]}').resolve())
+            p, R = P[i, :3], q2R(*P[i, 3:])
             f.write(' '.join(f'{v:.6f}' for v in (*(Rh @ p), *R2q(Rh @ R))) + '\n')
+            n += 1
+    return int(sec.sum()), len(P)
 
 
 def main():
@@ -61,6 +76,9 @@ def main():
     ap.add_argument('--her', type=int, default=2, help='VLMaps skip_frame')
     ap.add_argument('--ornek', type=int, default=50, help='depth_sample_rate: karede H*W/ornek nokta')
     ap.add_argument('--kategoriler', nargs='+', default=KATEGORI)
+    ap.add_argument('--hmax', type=float, default=0.0,
+                    help='kuşbakışı/etiket için yerden en yüksek hücre (m, 0=sınırsız); harita değişmez, yalnız çizim')
+    ap.add_argument('--max_w', type=float, default=0.0, help='açısal hızı bundan büyük kareleri atla (rad/s, 0=hepsi)')
     ap.add_argument('--zmax', type=float, default=3.0,
                     help='haritaya katılan en uzak derinlik (m); VLMaps varsayılanı 10 m uzak gürültüyü haritaya yayıyordu')
     a = ap.parse_args()
@@ -75,7 +93,8 @@ def main():
 
     sahne, cikti = Path(a.sahne).resolve(), Path(a.cikti).resolve()
     veri = cikti / 'veri'
-    hazirla(sahne, veri)
+    kalan, toplam = hazirla(sahne, veri, a.max_w)
+    print(f'kare: {kalan} / {toplam} (max_w {a.max_w})')
     sc = yaml.safe_load(open(sahne / 'vlmaps_config.yaml'))
     cfg = OmegaConf.load(VLMAPS / 'config/map_config/vlmaps.yaml')
     cfg.grid_size, cfg.cell_size = 1000, 0.05
@@ -97,6 +116,8 @@ def main():
     H, W = r1 - r0 + 1, c1 - c0 + 1
     rgb2, lab2, yuk = np.zeros((H, W, 3), np.uint8), np.full((H, W), -1), np.full((H, W), -1e9)
     sira = np.argsort(gp[:, 1])                          # alçaktan yükseğe: en üst hücre kalır
+    if a.hmax > 0:   # Habitat y = yükseklik; zemin (dünya z=0) y=0
+        sira = sira[(vm.pcd_min[1] + gp[sira, 1] * 0.05) <= a.hmax]
     for i in sira:
         r, h, c = gp[i, 0] - r0, gp[i, 1], gp[i, 2] - c0
         rgb2[r, c], lab2[r, c], yuk[r, c] = vm.grid_rgb[i][::-1], etiket[i], h
@@ -119,7 +140,7 @@ def main():
     sayim = {n: int((etiket == k).sum()) for k, n in enumerate(adlar)}
     ozet = {'sahne': str(sahne), 'hucre_sayisi': int(len(gp)), 'hucre_m': 0.05,
             'kapsama_m2_kusbakisi': round(float((lab2 >= 0).sum()) * 0.0025, 2),
-            'kategori_hucre': sayim, 'zmax_m': a.zmax, 'skip_frame': a.her, 'depth_sample_rate': a.ornek}
+            'kategori_hucre': sayim, 'zmax_m': a.zmax, 'max_w': a.max_w, 'hmax': a.hmax, 'kare': [kalan, toplam], 'skip_frame': a.her, 'depth_sample_rate': a.ornek}
     yaml.safe_dump(ozet, open(cikti / 'ozet.yaml', 'w'), allow_unicode=True, sort_keys=False)
     print(yaml.safe_dump(ozet, allow_unicode=True, sort_keys=False))
 

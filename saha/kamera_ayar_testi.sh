@@ -13,8 +13,10 @@ if [ "$TIP" = d435 ]; then
     [hw_hiza]="-p depth_module.profile:=640x480x30 -p rgb_camera.profile:=640x480x30 -p align_depth.enable:=true -r /camera/depth/image_rect_raw:=/camera/depth/image_ham -r /camera/depth/camera_info:=/camera/depth/camera_info_ham -r /camera/aligned_depth_to_color/image_raw:=/camera/depth/image_raw -r /camera/aligned_depth_to_color/camera_info:=/camera/depth/camera_info"
     [suzgecli]="-p depth_module.profile:=640x480x30 -p rgb_camera.profile:=640x480x30 -p spatial_filter.enable:=true -p temporal_filter.enable:=true"
     [lazer_yok]="-p depth_module.profile:=640x480x30 -p rgb_camera.profile:=640x480x30 -p depth_module.emitter_enabled:=0"
+    [yuksek_dogruluk]="-p depth_module.profile:=640x480x30 -p rgb_camera.profile:=640x480x30 -p depth_module.visual_preset:=3"
+    [vlmaps_onerilen]="-p depth_module.profile:=848x480x30 -p rgb_camera.profile:=640x480x30 -p depth_module.visual_preset:=3 -p spatial_filter.enable:=true -p temporal_filter.enable:=true"
   )
-  SIRA="varsayilan cozunurluk_848 hw_hiza suzgecli lazer_yok"
+  SIRA="${SIRA:-varsayilan cozunurluk_848 hw_hiza suzgecli lazer_yok yuksek_dogruluk vlmaps_onerilen}"
   # ayara özel -r kuralları temel kuraldan önce (ROS 2: ilk eşleşen yeniden adlandırma kuralı geçerli)
   baslat() { echo "(timeout -s INT 60 ros2 run realsense2_camera realsense2_camera_node --ros-args -r __ns:=/camera -r __node:=camera $1 -p enable_infra1:=false -p enable_infra2:=false -p pointcloud.enable:=false -r /camera/depth/image_rect_raw:=/camera/depth/image_raw > /tmp/kamera_$2.log 2>&1 &)"; }
   durdur="pkill -INT -f realsense2_camera_nod[e]; sleep 4; pkill -9 -f realsense2_camera_nod[e]"
