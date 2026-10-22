@@ -4,15 +4,24 @@
 #   d435 : Intel RealSense D435 — renk + derinlik PROFIL (varsayılan 640x480x30); derinlik konusu
 #          /camera/depth/image_rect_raw -> /camera/depth/image_raw yeniden adlandırılır (kayıt/analiz aynı konular).
 #          EK ile ek parametre: ör. EK="-p align_depth.enable:=true -p spatial_filter.enable:=true"
-# Kullanım: [SURE=1200] [PROFIL=640x480x30] [EK="..."] kamera_baslat.sh        Kapatmak: kamera_dur.sh
+#          D435_AYAR=vlmaps: VLMaps kaydı için önerilen (21.10 bulguları): derinlik 848x480 (D435 için önerilen
+#          çözünürlük), renk 640x480, uzamsal + zamansal süzgeç, High Accuracy ön ayarı (visual_preset 3 —
+#          parametre adı robotta doğrulanmalı: ros2 param describe /camera/camera depth_module.visual_preset).
+#          Ayrıca kayıtta dönüşler <= 0.2 rad/s olmalı (kapsama_turu.py --spin_w 0.2).
+# Kullanım: [SURE=1200] [PROFIL=640x480x30] [DPROFIL=..] [D435_AYAR=vlmaps] [EK="..."] kamera_baslat.sh   Kapatmak: kamera_dur.sh
 set -u
 source "$(dirname "$(readlink -f "$0")")/ortam.sh"
 SURE=${SURE:-1200}; PROFIL=${PROFIL:-640x480x30}; EK=${EK:-}
+if [ "${D435_AYAR:-}" = vlmaps ]; then
+  DPROFIL=${DPROFIL:-848x480x30}
+  EK="-p spatial_filter.enable:=true -p temporal_filter.enable:=true -p depth_module.visual_preset:=3 $EK"
+fi
+DPROFIL=${DPROFIL:-$PROFIL}
 ssh -o BatchMode=yes "$ROBOT" 'pgrep -f "orbbec_camer[a]|realsense2_camera_nod[e]" >/dev/null' && { echo "kamera zaten acik"; exit 0; }
 TIP=$(kamera_tipi); echo "kamera: $TIP"
 if [ "$TIP" = d435 ]; then
   robot_cmd "(timeout -s INT $SURE ros2 run realsense2_camera realsense2_camera_node --ros-args -r __ns:=/camera -r __node:=camera \
-      -p depth_module.profile:=$PROFIL -p rgb_camera.profile:=$PROFIL -p enable_infra1:=false -p enable_infra2:=false \
+      -p depth_module.profile:=$DPROFIL -p rgb_camera.profile:=$PROFIL -p enable_infra1:=false -p enable_infra2:=false \
       -p pointcloud.enable:=false -p publish_tf:=true -p tf_publish_rate:=0.0 \
       -r /camera/depth/image_rect_raw:=/camera/depth/image_raw $EK > /tmp/kamera.log 2>&1 &); sleep 10; \
     grep -m3 -iE 'error|fail|usb' /tmp/kamera.log; ros2 topic list --no-daemon 2>/dev/null | grep -E '^/camera/'" | sed 's/^/robot: /'

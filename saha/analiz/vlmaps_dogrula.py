@@ -64,6 +64,8 @@ def main():
     ap.add_argument('sensor_bag')
     ap.add_argument('--her', type=int, default=10)
     ap.add_argument('--lidar', type=float, nargs=3, default=[0.137, 0.015, -9.66])
+    ap.add_argument('--harita', help='map_server yaml: derinlik dilimini bağımsız haritaya karşı ölç (poz doğruluğu); '
+                    'sahne lidar_poz.py pozuyla harita çerçevesinde olmalı (odom pozunda başlangıç = harita orijini varsayılır)')
     a = ap.parse_args()
     S = a.sahne
     K = np.array([[float(v) for v in open(os.path.join(S, 'vlmaps_config.yaml')).read()
@@ -82,6 +84,7 @@ def main():
         gecerli = cv2.erode((d > 0).astype(np.uint8), np.ones((5, 5))) > 0
         dmax, dmin = cv2.dilate(d, np.ones((3, 3))), cv2.erode(np.where(d > 0, d, 99).astype(np.float32), np.ones((3, 3)))
         dk = (gecerli & (dmax - dmin > 0.15 * dmin) & (dmax - dmin > 0.10)).astype(np.uint8)   # >%15 ve >10 cm sıçrama
+        rgb = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(rgb)   # karanlık görüntüde de kenar
         rk = cv2.Canny(cv2.GaussianBlur(rgb, (5, 5), 0), 50, 150)
         if dk.sum() < 200 or rk.sum() == 0:
             continue
@@ -160,6 +163,15 @@ def main():
     rapor.append(f'3) kamera-lidar: derinlik dilimi noktalarının lidar haritasına uzaklığı medyan {u0[0] * 100:.1f} cm, '
                  f'<5 cm oranı {u0[1]:.2f} (kamera yaw 0). En iyi kamera yaw ofseti {en[0]:+.1f}° -> '
                  f'medyan {en[1] * 100:.1f} cm, <5 cm {en[2]:.2f}')
+
+    # ---- 5) kamera-harita (bağımsız referans): pozlar kaysa 3) bunu görmez, harita görür ----
+    if a.harita:
+        from lidar_poz import harita_noktalari
+        dh, _ = cKDTree(harita_noktalari(a.harita)).query(D)
+        yarim = len(D) // 2
+        rapor.append(f'5) kamera-harita: derinlik dilimi noktalarının haritadaki en yakın duvara uzaklığı medyan '
+                     f'{np.median(dh) * 100:.1f} cm, <5 cm oranı {np.mean(dh < 0.05):.2f}, <10 cm {np.mean(dh < 0.10):.2f} '
+                     f'(turun ilk yarısı medyan {np.median(dh[:yarim]) * 100:.1f} cm, ikinci yarısı {np.median(dh[yarim:]) * 100:.1f} cm)')
 
     # ---- 4) başlangıca dönüş (ilk/son lidar taraması) ----
     t0, t1 = zt[0, 1], zt[-1, 1]

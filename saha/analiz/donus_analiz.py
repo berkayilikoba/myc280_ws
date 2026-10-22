@@ -22,6 +22,8 @@ from bag2vlmaps import damga, okuyucu
 
 
 def hiza(rgb_gri, d):
+    # kontrast normalleştirme: kısa pozlamalı/karanlık görüntüde sabit Canny eşikleri kenar bulamıyordu (21.10)
+    rgb_gri = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(rgb_gri)
     gecerli = cv2.erode((d > 0).astype(np.uint8), np.ones((5, 5))) > 0
     dmax = cv2.dilate(d, np.ones((3, 3)))
     dmin = cv2.erode(np.where(d > 0, d, 99).astype(np.float32), np.ones((3, 3)))
