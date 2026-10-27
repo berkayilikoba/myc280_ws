@@ -67,6 +67,7 @@ def generate_launch_description():
                     'headless': headless,
                     'use_rviz': use_rviz,
                     'rviz_config_file': nav2_rviz_config,
+                    'world': LaunchConfiguration('world'),
                 }.items()
             )
         ]
@@ -136,6 +137,9 @@ def generate_launch_description():
             choices=['slam', 'amcl'],
             description='slam: slam_toolbox canlı harita. amcl: map argümanındaki bilinen '
                         'harita + AMCL (ölçüm koşuları için; bkz. scripts/world_to_map.py).'),
+        DeclareLaunchArgument(
+            'world', default_value=os.path.join(get_package_share_directory('limo_car'), 'worlds', 'empty_world.model'),
+            description='Gazebo dünyası (kollu diff). Gerçek oda: limo_car/worlds/lab_oda.world + map:=maps/lab_oda.yaml'),
         DeclareLaunchArgument(
             'map', default_value=os.path.join(bringup_dir, 'maps', 'sim_world.yaml'),
             description='localization:=amcl iken yüklenecek harita'),

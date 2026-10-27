@@ -61,3 +61,37 @@ ros2 launch limo_description gazebo_limo_mycobot.launch.py headless:=true use_rv
 - Renk görüntüsünün pozlama/bulanıklığı (D435 dönüşte bulanıklaşıyor, ≤ 0.2 rad/s) simde yok.
 - Sim–gerçek karşılaştırma: aynı komut dizisi (kayıttaki `cmd_vel`) simde oynatılıp (`scripts/sim_ikiz.py`) odom/IMU/
   derinlik istatistikleri karşılaştırılmalı.
+
+## Gerçek oda simde (27.10)
+
+- `limo_car/worlds/lab_oda.world`: robotun bulunduğu odanın 2 cm yoğun haritasından (`limo_bringup/maps/lab_oda.yaml`,
+  `saha/analiz/yogun_harita.py`) `scripts/harita_dunya.py` ile üretildi: 4934 dolu hücre → 559 kutu, 0.6 m yükseklik.
+  Dünya = harita çerçevesi; robot başlangıç işaretinde (0, 0, 0) doğar.
+- Doğrulama: sim lidarı gerçek 5 cm SLAM haritasına ICP ile uyum 0.96, poz (−1 cm, 0, −0.5°) — gerçek robotun aynı
+  noktadaki uyumu 0.93–0.97. Kamera geometrisi doğru, doku yok (gri).
+- Kol tabanı aracın üstünde: `limo_mycobot.xacro` `kol_z` 0.04 (yerden 0.19 m; önceden 0 = gövdenin içi), `kol_x`
+  −0.01 — ikisi de ölçülmeli.
+
+```bash
+export ROS_DOMAIN_ID=91 ROS_LOCALHOST_ONLY=0 FASTRTPS_DEFAULT_PROFILES_FILE=$PWD/src/limo_bringup/config/fastdds_sim_shm.xml
+ros2 launch limo_bringup limo_sim_nav2.launch.py localization:=amcl \
+  map:=$PWD/install/limo_bringup/share/limo_bringup/maps/lab_oda.yaml \
+  world:=$PWD/install/limo_car/share/limo_car/worlds/lab_oda.world
+# AMCL başlangıcı: /initialpose (0, 0, 0)
+```
+
+## Kavrama yaklaşması (simde uçtan uca)
+
+`ros2 run limo_autonomy kavrama --ros-args -p use_sim_time:=true -p harita:=<lab_oda.yaml>`; hedef
+`/kavrama/hedef` (PointStamped, map). Akış: plan (`kavrama_yaklasim.py`) → Nav2 ile kavrama öncesi poz Q → lidar ICP
+ile ince konum → P'ye dön, düz git, θ'ya dön → `/kavrama/nesne_robotta` (base_footprint).
+
+| hedef | Gazebo gerçek varış hatası | bildirilen ↔ gerçek nesne (robot çerçevesi) | not |
+|---|---|---|---|
+| dolap (3.73, 2.18), ICP'siz ilk sürüm | 2.7 cm, −2.7° | (0.226, −0.094) ↔ (0.246, −0.003): **9 cm** | AMCL ~8 cm / 4° yanılıyor |
+| masa (0.23, 1.40), ICP, eski son yaklaşma | 6 cm | (0.191, 0.060) ↔ (0.196, 0.059): 5 mm | yanal sapma düzeltilmiyordu |
+| dolap, ICP + P'ye yönelme | **1.3 cm, 1.6°** | (0.210, 0.021) ↔ (0.217, 0.019): **7 mm** | Nav2 Q'nun 28 cm gerisinde kaldı |
+| masa, ICP + P'ye yönelme | **2.1 cm, 0.1°** | (0.197, 0.010) ↔ (0.202, 0.009): **5 mm** | |
+
+Sonuç: AMCL kavrama için yetersiz (5–11 cm); lidar ICP ile hem varış (1–2 cm) hem kola bildirilen nesne konumu
+(≤ 7 mm) yeterli. Kalan iş: nesnenin kendi konumu (VLMaps kümeleri kaba) → yakın mesafede kamerayla ölçüm.

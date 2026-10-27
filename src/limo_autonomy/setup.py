@@ -22,5 +22,6 @@ setup(
     tests_require=['pytest'],
     entry_points={'console_scripts': [
         'patrol = limo_autonomy.patrol_node:main',
+        'kavrama = limo_autonomy.kavrama_dugumu:main',
     ]},
 )

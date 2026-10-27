@@ -12,98 +12,94 @@ bantlar:
   - 0.0
   - 0.05
   tur: ust
-  ornek: 119
+  ornek: 45
   erisilir: true
   yatay_m_p5_p50_p95:
   - 0.177
-  - 0.217
-  - 0.261
+  - 0.203
+  - 0.231
 - z_m:
   - 0.0
   - 0.05
   tur: yan
-  ornek: 393
-  erisilir: true
-  yatay_m_p5_p50_p95:
-  - 0.177
-  - 0.211
-  - 0.259
+  ornek: 14
+  erisilir: false
 - z_m:
   - 0.05
   - 0.15
   tur: ust
-  ornek: 317
-  erisilir: true
-  yatay_m_p5_p50_p95:
-  - 0.182
-  - 0.237
-  - 0.301
-- z_m:
-  - 0.05
-  - 0.15
-  tur: yan
-  ornek: 4789
+  ornek: 276
   erisilir: true
   yatay_m_p5_p50_p95:
   - 0.18
-  - 0.221
-  - 0.303
+  - 0.229
+  - 0.284
+- z_m:
+  - 0.05
+  - 0.15
+  tur: yan
+  ornek: 2538
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.179
+  - 0.216
+  - 0.288
 - z_m:
   - 0.15
   - 0.3
   tur: ust
-  ornek: 580
-  erisilir: true
-  yatay_m_p5_p50_p95:
-  - 0.177
-  - 0.227
-  - 0.296
-- z_m:
-  - 0.15
-  - 0.3
-  tur: yan
-  ornek: 15442
-  erisilir: true
-  yatay_m_p5_p50_p95:
-  - 0.184
-  - 0.233
-  - 0.333
-- z_m:
-  - 0.3
-  - 0.45
-  tur: ust
-  ornek: 89
-  erisilir: true
-  yatay_m_p5_p50_p95:
-  - 0.174
-  - 0.198
-  - 0.254
-- z_m:
-  - 0.3
-  - 0.45
-  tur: yan
-  ornek: 19676
-  erisilir: true
-  yatay_m_p5_p50_p95:
-  - 0.183
-  - 0.23
-  - 0.324
-- z_m:
-  - 0.45
-  - 0.6
-  tur: ust
-  ornek: 0
-  erisilir: false
-- z_m:
-  - 0.45
-  - 0.6
-  tur: yan
-  ornek: 8385
+  ornek: 602
   erisilir: true
   yatay_m_p5_p50_p95:
   - 0.178
-  - 0.21
-  - 0.281
+  - 0.23
+  - 0.301
+- z_m:
+  - 0.15
+  - 0.3
+  tur: yan
+  ornek: 13068
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.184
+  - 0.232
+  - 0.329
+- z_m:
+  - 0.3
+  - 0.45
+  tur: ust
+  ornek: 202
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.174
+  - 0.207
+  - 0.27
+- z_m:
+  - 0.3
+  - 0.45
+  tur: yan
+  ornek: 19633
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.183
+  - 0.233
+  - 0.331
+- z_m:
+  - 0.45
+  - 0.6
+  tur: ust
+  ornek: 0
+  erisilir: false
+- z_m:
+  - 0.45
+  - 0.6
+  tur: yan
+  ornek: 13033
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.181
+  - 0.215
+  - 0.295
 - z_m:
   - 0.6
   - 0.8
@@ -114,5 +110,9 @@ bantlar:
   - 0.6
   - 0.8
   tur: yan
-  ornek: 4
-  erisilir: false
+  ornek: 406
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.174
+  - 0.192
+  - 0.219

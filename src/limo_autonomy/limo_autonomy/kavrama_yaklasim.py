@@ -176,3 +176,30 @@ def yaklasim_bul(h, nesne, a=None, robot=None, hepsi=False):
     if hepsi:
         return adaylar
     return adaylar[0] if adaylar else None
+
+
+def icp2d(P, agac, M, T0, esikler=(0.3, 0.15, 0.08, 0.04), it=10):
+    """2B noktadan noktaya ICP (saha/analiz/lidar_poz.py ile aynı): P (N,2) robot çerçevesinde tarama, M harita
+    noktaları + cKDTree, T0 3x3 başlangıç -> (T, uyum: <4 cm eşleşen oran)"""
+    T = T0.copy()
+    for e in esikler:
+        for _ in range(it):
+            Q = P @ T[:2, :2].T + T[:2, 2]
+            d, j = agac.query(Q, distance_upper_bound=e)
+            k = np.isfinite(d)
+            if k.sum() < 20:
+                return T, 0.0
+            A, B = Q[k], M[j[k]]
+            ca, cb = A.mean(0), B.mean(0)
+            U, _, Vt = np.linalg.svd((A - ca).T @ (B - cb))
+            R = (U @ Vt).T
+            if np.linalg.det(R) < 0:
+                Vt[1] *= -1
+                R = (U @ Vt).T
+            dT = np.eye(3)
+            dT[:2, :2], dT[:2, 2] = R, cb - R @ ca
+            T = dT @ T
+            if abs(math.atan2(R[1, 0], R[0, 0])) < 1e-5 and np.linalg.norm(dT[:2, 2]) < 1e-5:
+                break
+    d, _ = agac.query(P @ T[:2, :2].T + T[:2, 2], distance_upper_bound=0.04)
+    return T, float(np.isfinite(d).mean())
