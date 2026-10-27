@@ -15,6 +15,11 @@ if [ "$TIP" = d435 ]; then
     [lazer_yok]="-p depth_module.profile:=640x480x30 -p rgb_camera.profile:=640x480x30 -p depth_module.emitter_enabled:=0"
     [yuksek_dogruluk]="-p depth_module.profile:=640x480x30 -p rgb_camera.profile:=640x480x30 -p depth_module.visual_preset:=3"
     [vlmaps_onerilen]="-p depth_module.profile:=848x480x30 -p rgb_camera.profile:=640x480x30 -p depth_module.visual_preset:=3 -p spatial_filter.enable:=true -p temporal_filter.enable:=true"
+    # 27.10 kayıt profili (renk 1280x720@15, derinlik 848x480@15): ön ayar ve süzgeç etkisini ayırmak için
+    [p720_temel]="-p depth_module.profile:=848x480x15 -p rgb_camera.profile:=1280x720x15"
+    [p720_ha]="-p depth_module.profile:=848x480x15 -p rgb_camera.profile:=1280x720x15 -p depth_module.visual_preset:=3"
+    [p720_suzgec]="-p depth_module.profile:=848x480x15 -p rgb_camera.profile:=1280x720x15 -p spatial_filter.enable:=true -p temporal_filter.enable:=true"
+    [p720_hepsi]="-p depth_module.profile:=848x480x15 -p rgb_camera.profile:=1280x720x15 -p depth_module.visual_preset:=3 -p spatial_filter.enable:=true -p temporal_filter.enable:=true"
   )
   SIRA="${SIRA:-varsayilan cozunurluk_848 hw_hiza suzgecli lazer_yok yuksek_dogruluk vlmaps_onerilen}"
   # ayara özel -r kuralları temel kuraldan önce (ROS 2: ilk eşleşen yeniden adlandırma kuralı geçerli)
