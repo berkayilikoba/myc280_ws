@@ -359,6 +359,59 @@ def get_last_error_from_log(hata_path: str) -> str | None:
         return None
 
 
+def extract_dogrulama_ozet(cikti: str, limit: int = 5) -> str:
+    """
+    Doğrulama komutu çıktısından ilk FAILED/Error satırlarını özet olarak çıkarır.
+    """
+    if not cikti:
+        return ""
+    eslesenler: list[str] = []
+    for line in cikti.splitlines():
+        line_clean = line.strip()
+        if not line_clean:
+            continue
+        l_upper = line_clean.upper()
+        if "FAILED" in l_upper or "ERROR" in l_upper or "FAIL" in l_upper:
+            eslesenler.append(line_clean)
+            if len(eslesenler) >= limit:
+                break
+    if eslesenler:
+        return "\n".join(eslesenler)
+    lines = [l.strip() for l in cikti.splitlines() if l.strip()]
+    return lines[-1] if lines else ""
+
+
+def run_dogrulama_komut(
+    komut: str,
+    cwd: str | None = None,
+    zaman_asimi: float | None = None,
+) -> tuple[int, str]:
+    """
+    Doğrulama komutunu çalıştırır ve (çıkış_kodu, birleşik_çıktı) döner.
+    """
+    try:
+        proc = subprocess.run(
+            komut,
+            shell=True,
+            cwd=cwd,
+            timeout=zaman_asimi,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return proc.returncode, proc.stdout or ""
+    except subprocess.TimeoutExpired as e:
+        out = (e.stdout or "") if isinstance(e.stdout, str) else ""
+        if e.stderr:
+            out += "\n" + (e.stderr if isinstance(e.stderr, str) else "")
+        out += f"\nZaman aşımı ({zaman_asimi}s) aşıldı."
+        return 124, out
+    except Exception as e:
+        return 1, f"Komut çalıştırılamadı: {e}"
+
+
 # ---------------------------------------------------------------------------
 # Bekçi Süreci
 # ---------------------------------------------------------------------------
@@ -728,6 +781,7 @@ def cmd_baslat(args: argparse.Namespace) -> None:
         "bekci_pid": None,
         "tur": 1,
         "turler": [],
+        "dogrulama": [],
         "son_adim": None,
         "yazilan_dosyalar": [],
         "calistirilan_komutlar": [],
@@ -764,27 +818,31 @@ def cmd_baslat(args: argparse.Namespace) -> None:
         sys.exit(0)
 
 
-def cmd_devam(args: argparse.Namespace) -> None:
-    etiket = args.etiket
+def calistir_devam(
+    etiket: str,
+    mesaj: str,
+    bekle: bool = False,
+    zaman_asimi: float | None = None,
+) -> int:
     state_root = get_state_root()
     task_dir = os.path.join(state_root, etiket)
     if not os.path.exists(task_dir):
         print(f"Hata: Görev bulunamadı: {etiket}", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     meta = load_meta(task_dir)
     if not meta:
         print(
             f"Hata: Görev meta dosyası okunamadı: {etiket}", file=sys.stderr
         )
-        sys.exit(1)
+        return 1
 
     if meta.get("durum") == "calisiyor" and gorev_canli(meta):
         print(
             f"Hata: Görev '{etiket}' henüz bitmemiş. Devam ettirilemez.",
             file=sys.stderr,
         )
-        sys.exit(1)
+        return 1
 
     conversation_id = meta.get("conversation_id")
     if not conversation_id:
@@ -792,7 +850,7 @@ def cmd_devam(args: argparse.Namespace) -> None:
             f"Hata: '{etiket}' görevinde conversation_id bulunamadı.",
             file=sys.stderr,
         )
-        sys.exit(1)
+        return 1
 
     current_tur = meta.get("tur", 1)
     turler = meta.get("turler", [])
@@ -811,14 +869,14 @@ def cmd_devam(args: argparse.Namespace) -> None:
     meta["turler"] = turler
     meta["tur"] = current_tur + 1
     meta["durum"] = "calisiyor"
-    meta["takip_mesaji"] = args.mesaj
+    meta["takip_mesaji"] = mesaj
     meta["hata"] = None
     save_meta(task_dir, meta)
 
     gemini_path = os.path.join(task_dir, "GEMINI.md")
     if os.path.exists(gemini_path):
         with open(gemini_path, "a", encoding="utf-8") as f:
-            f.write(f"\n\n---\n## Takip Turu {meta['tur']}\n{args.mesaj}\n")
+            f.write(f"\n\n---\n## Takip Turu {meta['tur']}\n{mesaj}\n")
 
     script_path = os.path.abspath(__file__)
     bekci = subprocess.Popen(
@@ -833,12 +891,127 @@ def cmd_devam(args: argparse.Namespace) -> None:
     meta["pid"] = None  # önceki turun agy pid'i ölü; yenisini bekçi yazar
     save_meta(task_dir, meta)
 
-    if args.bekle:
-        code = wait_for_tasks([etiket], zaman_asimi=None)
-        sys.exit(code)
+    if bekle:
+        return wait_for_tasks([etiket], zaman_asimi=zaman_asimi)
     else:
         print(f"Görev '{etiket}' (Tur {meta['tur']}) başlatıldı.")
-        sys.exit(0)
+        return 0
+
+
+def cmd_devam(args: argparse.Namespace) -> None:
+    code = calistir_devam(args.etiket, args.mesaj, bekle=args.bekle)
+    sys.exit(code)
+
+
+def cmd_dogrula(args: argparse.Namespace) -> None:
+    etiket = args.etiket
+    komut = args.test
+    state_root = get_state_root()
+    task_dir = os.path.join(state_root, etiket)
+    if not os.path.exists(task_dir):
+        print(f"Hata: Görev bulunamadı: {etiket}", file=sys.stderr)
+        sys.exit(1)
+
+    meta = load_meta(task_dir)
+    if not meta:
+        print(
+            f"Hata: Görev meta dosyası okunamadı: {etiket}", file=sys.stderr
+        )
+        sys.exit(1)
+
+    # 1. ETIKET "bitti" ya da "hata" durumunda olmalı (çalışıyorsa önce bekle)
+    if meta.get("durum") == "calisiyor" and gorev_canli(meta):
+        print(
+            f"Hata: Görev '{etiket}' henüz bitmemiş (canlı çalışıyor). Doğrulama için önce bitmesini bekleyin.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    durum = meta.get("durum")
+    if durum not in ("bitti", "hata"):
+        print(
+            f"Hata: Görev '{etiket}' doğrulanabilir durumda değil ({durum}). 'bitti' ya da 'hata' durumunda olmalı.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    cwd = None
+    if args.cwd:
+        cwd = os.path.abspath(os.path.expanduser(args.cwd))
+        if not os.path.isdir(cwd):
+            print(
+                f"Hata: Çalışma dizini bulunamadı: {args.cwd}", file=sys.stderr
+            )
+            sys.exit(1)
+
+    max_tur = max(1, args.tur)
+    tur = 1
+    while tur <= max_tur:
+        cikis, cikti = run_dogrulama_komut(
+            komut, cwd=cwd, zaman_asimi=args.zaman_asimi
+        )
+        if cikis == 0:
+            record = {
+                "tur": tur,
+                "komut": komut,
+                "cikis": 0,
+                "ozet": "",
+                "zaman": datetime.now().isoformat(),
+            }
+            dogrulama_list = meta.get("dogrulama")
+            if not isinstance(dogrulama_list, list):
+                dogrulama_list = []
+            dogrulama_list.append(record)
+            meta["dogrulama"] = dogrulama_list
+            save_meta(task_dir, meta)
+
+            print("DOGRULANDI")
+            sys.exit(0)
+
+        # Başarısızlık kaydı
+        ozet = extract_dogrulama_ozet(cikti)
+        record = {
+            "tur": tur,
+            "komut": komut,
+            "cikis": cikis,
+            "ozet": ozet,
+            "zaman": datetime.now().isoformat(),
+        }
+        dogrulama_list = meta.get("dogrulama")
+        if not isinstance(dogrulama_list, list):
+            dogrulama_list = []
+        dogrulama_list.append(record)
+        meta["dogrulama"] = dogrulama_list
+        save_meta(task_dir, meta)
+
+        if tur >= max_tur:
+            break
+
+        lines = cikti.splitlines()
+        son_60 = (
+            "\n".join(lines[-60:]) if len(lines) > 60 else "\n".join(lines)
+        )
+        mesaj = (
+            f"Doğrulama komutu başarısız: {komut}\n"
+            f"```\n{son_60}\n```\n"
+            "Kök nedeni bul ve düzelt. Testleri gevşetme."
+        )
+
+        code = calistir_devam(etiket, mesaj, bekle=True)
+        meta_after = load_meta(task_dir)
+        if meta_after:
+            meta = meta_after
+        else:
+            break
+
+        durum = meta.get("durum")
+        if durum not in ("bitti", "hata"):
+            break
+
+        tur += 1
+
+    print(f"DOGRULANAMADI ({tur} tur)")
+    sys.exit(1)
 
 
 def cmd_durum(args: argparse.Namespace) -> None:
@@ -878,11 +1051,23 @@ def cmd_durum(args: argparse.Namespace) -> None:
         model = meta.get("model") or "flash"
         tur = meta.get("tur", 1)
 
+        dogrulama_sonucu = "-"
+        dogrulama_list = meta.get("dogrulama")
+        if isinstance(dogrulama_list, list) and dogrulama_list:
+            son_dog = dogrulama_list[-1]
+            if isinstance(son_dog, dict):
+                cikis = son_dog.get("cikis")
+                if cikis == 0:
+                    dogrulama_sonucu = "✓"
+                else:
+                    dogrulama_sonucu = "✗"
+
         items.append(
             {
                 "etiket": etiket,
                 "model": model,
                 "durum": durum,
+                "dogrulama": dogrulama_sonucu,
                 "tur": tur,
                 "sure": sure,
                 "son_adim": son_adim,
@@ -910,6 +1095,7 @@ def cmd_durum(args: argparse.Namespace) -> None:
         "ETİKET",
         "MODEL",
         "DURUM",
+        "DOGRULAMA",
         "TUR",
         "SÜRE",
         "SON ADIM",
@@ -929,6 +1115,7 @@ def cmd_durum(args: argparse.Namespace) -> None:
                 str(it["etiket"]),
                 str(it["model"]),
                 str(it["durum"]),
+                str(it["dogrulama"]),
                 str(it["tur"]),
                 sure_str,
                 str(it["son_adim"]),
@@ -1446,6 +1633,30 @@ def main() -> None:
         help="Eksik izinleri otomatik ekle",
     )
 
+    # 10. dogrula
+    p_dogrula = subparsers.add_parser(
+        "dogrula",
+        help="Otomatik test ve düzeltme döngüsü ile görevi doğrula",
+    )
+    p_dogrula.add_argument("etiket", help="Görev etiketi")
+    p_dogrula.add_argument(
+        "--test", required=True, help="Çalıştırılacak doğrulama komutu"
+    )
+    p_dogrula.add_argument(
+        "--tur",
+        type=int,
+        default=3,
+        help="Maksimum deneme/düzeltme tur sayısı (varsayılan: 3)",
+    )
+    p_dogrula.add_argument(
+        "--cwd", help="Komutun çalıştırılacağı dizin"
+    )
+    p_dogrula.add_argument(
+        "--zaman-asimi",
+        type=float,
+        help="Komut zaman aşımı süresi (saniye)",
+    )
+
     # Dahili bekçi
     p_bekci = subparsers.add_parser("_bekci", help=argparse.SUPPRESS)
     p_bekci.add_argument("etiket", help="Görev etiketi")
@@ -1456,6 +1667,8 @@ def main() -> None:
         cmd_baslat(args)
     elif args.command == "devam":
         cmd_devam(args)
+    elif args.command == "dogrula":
+        cmd_dogrula(args)
     elif args.command == "durum":
         cmd_durum(args)
     elif args.command == "bekle":

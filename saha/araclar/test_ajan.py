@@ -20,6 +20,7 @@ from ajan import (
     add_permissions,
     check_permissions,
     extract_command,
+    extract_dogrulama_ozet,
     extract_file_path,
     extract_rapor,
     get_last_error_from_log,
@@ -153,6 +154,40 @@ elif mode == "no_json_block":
             "response": "Bu yanıtta JSON bloğu bulunmamaktadır, serbest metin raporudur.",
             "duration_seconds": 0.8,
             "usage": {{"input_tokens": 50, "output_tokens": 20, "total_tokens": 70}}
+        }}
+    }}
+    print(json.dumps(res_ev), flush=True)
+
+elif mode == "fix_on_second_turn":
+    init_ev = {{"event": "init", "conversation_id": conv_id, "init": {{"model": "test-model"}}}}
+    print(json.dumps(init_ev), flush=True)
+    fix_file = os.environ.get("FAKE_AGY_FIX_FILE", "")
+    is_followup = any(arg == "--conversation" for arg in sys.argv)
+    if is_followup and fix_file:
+        try:
+            with open(fix_file, "w", encoding="utf-8") as ff:
+                ff.write("duzeltildi\\n")
+        except Exception:
+            pass
+        step_ev = {{
+            "event": "step_update",
+            "step_update": {{
+                "conversation_id": conv_id,
+                "step_index": 1,
+                "state": "DONE",
+                "step_type": "tool",
+                "tool_name": "write_file",
+                "tool_info": {{"parameters": {{"Path": fix_file}}}},
+            }}
+        }}
+        print(json.dumps(step_ev), flush=True)
+    res_ev = {{
+        "event": "result",
+        "result": {{
+            "conversation_id": conv_id,
+            "status": "SUCCESS",
+            "response": "İşlem yapıldı.\\n```json\\n{{\\"ozet\\": \\"Düzeltildi\\", \\"degisen_dosyalar\\": [], \\"calistirilan_testler\\": [], \\"acik_konular\\": [], \\"basarili\\": true}}\\n```",
+            "duration_seconds": 0.5,
         }}
     }}
     print(json.dumps(res_ev), flush=True)
@@ -678,3 +713,160 @@ def test_izin_kontrol_tek_basina(test_env: dict[str, Any]) -> None:
     )
     assert res3.returncode == 0
     assert "Tüm izinler mevcut." in res3.stdout
+
+
+# ---------------------------------------------------------------------------
+# Doğrulama (dogrula) Testleri
+# ---------------------------------------------------------------------------
+def test_extract_dogrulama_ozet() -> None:
+    """extract_dogrulama_ozet fonksiyonunun hata satırlarını doğru yakaladığını test eder."""
+    text1 = """
+    running test...
+    FAILED test_a.py::test_1 - AssertionError
+    passed test_b.py
+    ERROR: module not found
+    """
+    ozet1 = extract_dogrulama_ozet(text1)
+    assert "FAILED test_a.py" in ozet1
+    assert "ERROR: module not found" in ozet1
+
+    # Hata anahtar kelimesi içermeyen çıktı
+    text2 = "Compiling project\nBuild failed with exit code 1"
+    ozet2 = extract_dogrulama_ozet(text2)
+    assert "Build failed with exit code 1" in ozet2
+
+
+def test_dogrula_ilk_denemede_gecen(test_env: dict[str, Any]) -> None:
+    """İlk denemede başarılı olan doğrulama testini doğrular."""
+    env = test_env["env"]
+    res_baslat = run_ajan(
+        ["baslat", "dogrula_gecen", "-m", "İlk iş", "--bekle"], env=env
+    )
+    assert res_baslat.returncode == 0
+
+    res_dogrula = run_ajan(
+        [
+            "dogrula",
+            "dogrula_gecen",
+            "--test",
+            f"{sys.executable} -c 'exit(0)'",
+        ],
+        env=env,
+    )
+    assert res_dogrula.returncode == 0
+    assert "DOGRULANDI" in res_dogrula.stdout
+
+    meta_path = test_env["state_dir"] / "dogrula_gecen" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert len(meta.get("dogrulama", [])) == 1
+    assert meta["dogrulama"][0]["tur"] == 1
+    assert meta["dogrulama"][0]["cikis"] == 0
+
+    res_durum = run_ajan(["durum", "dogrula_gecen", "--json"], env=env)
+    assert res_durum.returncode == 0
+    assert json.loads(res_durum.stdout)["dogrulama"] == "✓"
+
+
+def test_dogrula_bir_turda_duzelen(
+    test_env: dict[str, Any], tmp_path: Any
+) -> None:
+    """İlk turda başarısız olup takip turunda düzelen görevi doğrular."""
+    env = test_env["env"]
+    env["FAKE_AGY_MODE"] = "fix_on_second_turn"
+    fix_file = tmp_path / "duzeltildi.txt"
+    env["FAKE_AGY_FIX_FILE"] = str(fix_file)
+
+    res_baslat = run_ajan(
+        ["baslat", "dogrula_duzelen", "-m", "Düzeltme görevi", "--bekle"],
+        env=env,
+    )
+    assert res_baslat.returncode == 0
+    assert not fix_file.exists()
+
+    test_cmd = (
+        f"{sys.executable} -c \""
+        f"import os, sys; "
+        f"sys.exit(0 if os.path.exists({repr(str(fix_file))}) else 1)\""
+    )
+    res_dogrula = run_ajan(
+        ["dogrula", "dogrula_duzelen", "--test", test_cmd, "--tur", "3"],
+        env=env,
+    )
+    assert res_dogrula.returncode == 0
+    assert "DOGRULANDI" in res_dogrula.stdout
+    assert fix_file.is_file()
+
+    meta_path = test_env["state_dir"] / "dogrula_duzelen" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert len(meta.get("dogrulama", [])) == 2
+    assert meta["dogrulama"][0]["tur"] == 1
+    assert meta["dogrulama"][0]["cikis"] == 1
+    assert meta["dogrulama"][1]["tur"] == 2
+    assert meta["dogrulama"][1]["cikis"] == 0
+    assert meta["tur"] == 2
+
+    res_durum = run_ajan(["durum", "dogrula_duzelen", "--json"], env=env)
+    assert res_durum.returncode == 0
+    assert json.loads(res_durum.stdout)["dogrulama"] == "✓"
+
+
+def test_dogrula_tur_sinirinda_basarisiz(test_env: dict[str, Any]) -> None:
+    """Belirtilen maksimum tur sayısına ulaşılınca başarısız sonlandığını doğrular."""
+    env = test_env["env"]
+    res_baslat = run_ajan(
+        ["baslat", "dogrula_sinir", "-m", "Sınır testi", "--bekle"], env=env
+    )
+    assert res_baslat.returncode == 0
+
+    test_cmd = (
+        f"{sys.executable} -c \""
+        f"import sys; "
+        f"sys.stderr.write('FAILED test_ornek - AssertionError\\n'); "
+        f"sys.exit(1)\""
+    )
+    res_dogrula = run_ajan(
+        ["dogrula", "dogrula_sinir", "--test", test_cmd, "--tur", "2"],
+        env=env,
+    )
+    assert res_dogrula.returncode == 1
+    assert "DOGRULANAMADI (2 tur)" in res_dogrula.stdout
+
+    meta_path = test_env["state_dir"] / "dogrula_sinir" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert len(meta.get("dogrulama", [])) == 2
+    assert meta["dogrulama"][0]["cikis"] == 1
+    assert meta["dogrulama"][1]["cikis"] == 1
+    assert "FAILED" in meta["dogrulama"][0]["ozet"]
+
+    res_durum = run_ajan(["durum", "dogrula_sinir", "--json"], env=env)
+    assert res_durum.returncode == 0
+    assert json.loads(res_durum.stdout)["dogrulama"] == "✗"
+
+
+def test_dogrula_calisan_gorevde_ret(test_env: dict[str, Any]) -> None:
+    """Canlı çalışan bir görev üzerinde doğrulamanın reddedildiğini test eder."""
+    env = test_env["env"]
+    env["FAKE_AGY_MODE"] = "sleep"
+
+    res_baslat = run_ajan(
+        ["baslat", "dogrula_uyuyan", "-m", "Uzun iş"], env=env
+    )
+    assert res_baslat.returncode == 0
+    time.sleep(0.6)
+
+    res_dogrula = run_ajan(
+        [
+            "dogrula",
+            "dogrula_uyuyan",
+            "--test",
+            f"{sys.executable} -c 'exit(0)'",
+        ],
+        env=env,
+    )
+    assert res_dogrula.returncode != 0
+    assert (
+        "çalışıyor" in res_dogrula.stderr.lower()
+        or "bitmemiş" in res_dogrula.stderr.lower()
+    )
+
+    run_ajan(["iptal", "dogrula_uyuyan"], env=env)

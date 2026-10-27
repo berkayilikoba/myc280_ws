@@ -25,7 +25,7 @@ Her görev, `$AJAN_DIZIN/<etiket>/` altında kendi yalıtılmış ortamında bar
 
 ```text
 ~/.local/state/ajan/<etiket>/
-├── meta.json         # Durum, PID, model, son adım, token toplamı, tur geçmişi
+├── meta.json         # Durum, PID, model, son adım, token toplamı, tur geçmişi, doğrulama geçmişi
 ├── GEMINI.md         # Sabit ajan kuralları + görev yönergesi
 ├── calisma/          # agy çalışma dizini (cwd)
 ├── olaylar.jsonl     # Ham stream-json olay akışı
@@ -133,10 +133,10 @@ python3 ajan.py durum --json
 
 Tablo çıktısı:
 ```text
-ETİKET    MODEL                  DURUM    TUR  SÜRE   SON ADIM                 DOSYA  TOKEN
------------------------------------------------------------------------------------------
-gorev1    gemini-3.8-flash-high  bitti    2    14.2s  write_file test_son.py   2      5420
-gorev2    gemini-4-argon-high    calisiyor 1   5.1s   run_command pytest       1      1200
+ETİKET    MODEL                  DURUM    DOGRULAMA  TUR  SÜRE   SON ADIM                 DOSYA  TOKEN
+--------------------------------------------------------------------------------------------------
+gorev1    gemini-3.8-flash-high  bitti    ✓          2    14.2s  write_file test_son.py   2      5420
+gorev2    gemini-4-argon-high    calisiyor -         1    5.1s   run_command pytest       1      1200
 ```
 *Not: PID'si sonlanmış ancak meta kaydında 'calisiyor' kalmış görevler otomatik `kayip` durumuna düşer.*
 
@@ -184,6 +184,33 @@ python3 ajan.py izin kontrol --yaz /proje/yol --komut "pytest"
 # Eksik izinleri settings.json'a otomatik ekleme
 python3 ajan.py izin kontrol --yaz /proje/yol --komut "pytest" --izin-ekle
 ```
+
+### 6.10 `dogrula` — Otomatik Test ve Düzeltme Döngüsü
+Tamamlanan bir görevi yerel ortamda otomatik bir test komutu ile sınar; başarısız olursa çıktının son 60 satırını `devam` ile ajana geri besleyerek düzeltmesini ister ve başarıya ulaşana kadar döngüyü tekrarlar.
+
+```bash
+# Görevi test et (varsayılan: 3 tur)
+python3 ajan.py dogrula gorev1 --test "pytest tests/test_kod.py"
+
+# Özel çalışma dizini, zaman aşımı ve maksimum tur sayısı ile doğrula
+python3 ajan.py dogrula gorev2 --test "colcon test" --tur 5 --cwd /home/user/limo_ws --zaman-asimi 60
+```
+
+- **Ön Koşul:** Görev `bitti` ya da `hata` durumunda olmalıdır. Canlı çalışan bir görev için çağrılırsa işlem reddedilir (çıkış kodu 1).
+- **Test Çalıştırma:** Belirtilen `--test` komutu doğrudan ortamda çalıştırılır (`shell=True`).
+- **Başarı:** Komut çıkış kodu 0 olursa ekrana `DOGRULANDI` basılır, `meta["dogrulama"]` kaydı eklenir ve çıkış kodu 0 ile sonlanır.
+- **Hata ve Geri Besleme:** Komut başarısız olursa son 60 satırlık çıktı ajana şu şablonla iletilir:
+  ```text
+  Doğrulama komutu başarısız: <KOMUT>
+  ```
+  <çıktı>
+  ```
+  Kök nedeni bul ve düzelt. Testleri gevşetme.
+  ```
+  Ajanın yanıtı ve düzeltmesi beklenir (`wait_for_tasks`) ve komut yeniden çalıştırılır.
+- **Tur Sınırı:** Belirtilen `--tur` adedince başarısız olunursa ekrana `DOGRULANAMADI (n tur)` basılır ve çıkış kodu 1 ile sonlanır.
+- **Doğrulama Geçmişi:** Her deneme `meta.json` içindeki `dogrulama` listesine `{tur, komut, cikis, ozet, zaman}` şeklinde kaydedilir.
+- **Durum Göstergesi:** `ajan durum` çıktısındaki `DOGRULAMA` sütunu son doğrulama sonucunu gösterir (`✓`: başarılı, `✗`: başarısız, `-`: test edilmedi).
 
 ---
 
