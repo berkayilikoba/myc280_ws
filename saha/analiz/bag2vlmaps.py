@@ -161,23 +161,53 @@ def goruntu(m):
     raise ValueError(f'desteklenmeyen kodlama {m.encoding}')
 
 
-def derinlik_hizala(dmm, Kd, Kc, T_c_d, boyut, zmin=0.2, zmax=8.0, doldur=True):
-    """Derinlik (mm, derinlik optik) -> renk optik çerçevesine izdüşüm, metre, z-tamponu (en yakın kazanır)."""
+def derinlik_hizala(dmm, Kd, Kc, T_c_d, boyut, zmin=0.2, zmax=8.0, doldur=True, kapla=True):
+    """Derinlik (mm, derinlik optik) -> renk optik çerçevesine izdüşüm, metre, z-tamponu (en yakın kazanır).
+    kapla (27.10, varsayılan): RealSense SDK align gibi her derinlik pikselinin köşeleri (u±0.5, v±0.5) izdüşürülür ve
+    renk görüntüsünde kapladığı dikdörtgenin tamamı z-testiyle yazılır. Eskisi (kapla=False) pikseli tek noktaya
+    yazıyordu: D435'te derinlik FOV'u geniş olduğundan renk ızgarasında delik kalıyor, ön plan nesnelerinin deliklerine
+    arka planın derinliği sızıyordu (nesne kenarında yanlış 3B nokta). Dabai donanım hizasında (aynı K, T=I) fark yok."""
     H, W = dmm.shape
     v, u = np.nonzero((dmm > zmin * 1000) & (dmm < zmax * 1000))
     z = dmm[v, u].astype(np.float64) / 1000.0
-    P = np.stack([(u - Kd[0, 2]) * z / Kd[0, 0], (v - Kd[1, 2]) * z / Kd[1, 1], z, np.ones_like(z)])
-    Q = T_c_d @ P
-    on = Q[2] > 1e-3
-    Q = Q[:, on]
-    uc = np.round(Kc[0, 0] * Q[0] / Q[2] + Kc[0, 2]).astype(int)
-    vc = np.round(Kc[1, 1] * Q[1] / Q[2] + Kc[1, 2]).astype(int)
     Hc, Wc = boyut
-    ic = (uc >= 0) & (uc < Wc) & (vc >= 0) & (vc < Hc)
-    uc, vc, zc = uc[ic], vc[ic], Q[2, ic]
-    sira = np.argsort(-zc)                      # uzaktan yakına yaz: son yazılan (en yakın) kalır
+
+    def izd(du, dv):
+        P = np.stack([(u + du - Kd[0, 2]) * z / Kd[0, 0], (v + dv - Kd[1, 2]) * z / Kd[1, 1], z, np.ones_like(z)])
+        Q = T_c_d @ P
+        Q[2] = np.maximum(Q[2], 1e-3)
+        return Kc[0, 0] * Q[0] / Q[2] + Kc[0, 2], Kc[1, 1] * Q[1] / Q[2] + Kc[1, 2], Q[2]
     out = np.zeros((Hc, Wc), np.float32)
-    out[vc[sira], uc[sira]] = zc[sira]
+    if not kapla:
+        x, y, zc = izd(0, 0)
+        uc, vc = np.round(x).astype(int), np.round(y).astype(int)
+        ic = (uc >= 0) & (uc < Wc) & (vc >= 0) & (vc < Hc) & (zc > 1e-3)
+        uc, vc, zc = uc[ic], vc[ic], zc[ic]
+        sira = np.argsort(-zc)                      # uzaktan yakına yaz: son yazılan (en yakın) kalır
+        out[vc[sira], uc[sira]] = zc[sira]
+    else:
+        x0, y0, zc = izd(-0.5, -0.5)
+        x1, y1, _ = izd(0.5, 0.5)
+        u0, v0 = np.ceil(np.minimum(x0, x1) - 0.5).astype(int), np.ceil(np.minimum(y0, y1) - 0.5).astype(int)
+        u1, v1 = np.floor(np.maximum(x0, x1) - 0.5).astype(int), np.floor(np.maximum(y0, y1) - 0.5).astype(int)
+        u1, v1 = np.maximum(u1, u0), np.maximum(v1, v0)          # en az bir piksel
+        ok = (u1 >= 0) & (u0 < Wc) & (v1 >= 0) & (v0 < Hc) & (u1 - u0 < 6) & (v1 - v0 < 6)
+        u0, u1, v0, v1, zc = u0[ok], u1[ok], v0[ok], v1[ok], zc[ok]
+        sira = np.argsort(-zc)
+        u0, u1, v0, v1, zc = u0[sira], u1[sira], v0[sira], v1[sira], zc[sira]
+        zbuf = np.full((Hc, Wc), np.inf, np.float32)
+        for dy in range(int((v1 - v0).max(initial=0)) + 1):
+            for dx in range(int((u1 - u0).max(initial=0)) + 1):
+                k = (u0 + dx <= u1) & (v0 + dy <= v1)
+                uu, vv, zz = u0[k] + dx, v0[k] + dy, zc[k]
+                ic = (uu >= 0) & (uu < Wc) & (vv >= 0) & (vv < Hc)
+                uu, vv, zz = uu[ic], vv[ic], zz[ic]
+                # aynı hücreye birden çok yazım: uzaktan yakına sıralı -> numpy atamada son (en yakın) kalır; önceki
+                # ofset turlarında yazılmış daha yakın değeri korumak için z-testi
+                yaz = zz < zbuf[vv, uu]
+                zbuf[vv[yaz], uu[yaz]] = zz[yaz]
+        out = np.where(np.isfinite(zbuf), zbuf, 0).astype(np.float32)
+        doldur = False                              # kaplama deliği zaten bırakmıyor
     if doldur:
         # Seyrek izdüşüm delikleri: derinlik görüş alanı renkten genişse (D435: 87° vs 69°, ikisi de 640 px) derinlik
         # pikselleri renk ızgarasına seyrek düşer (14.10: geçerli oran %40). 3x3'te >=4 geçerli komşusu olan boş piksele
