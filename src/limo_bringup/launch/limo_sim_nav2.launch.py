@@ -139,7 +139,7 @@ def generate_launch_description():
                         'harita + AMCL (ölçüm koşuları için; bkz. scripts/world_to_map.py).'),
         DeclareLaunchArgument(
             'world', default_value=os.path.join(get_package_share_directory('limo_car'), 'worlds', 'empty_world.model'),
-            description='Gazebo dünyası (kollu diff). Gerçek oda: limo_car/worlds/lab_oda.world + map:=maps/lab_oda.yaml'),
+            description='Gazebo dünyası (kollu diff). Gerçek oda: limo_car/worlds/lab_oda_3b.world (3B, dokulu; docs/oda_3b.md) ya da lab_oda.world (2B kutular), ikisi de map:=maps/lab_oda.yaml'),
         DeclareLaunchArgument(
             'map', default_value=os.path.join(bringup_dir, 'maps', 'sim_world.yaml'),
             description='localization:=amcl iken yüklenecek harita'),

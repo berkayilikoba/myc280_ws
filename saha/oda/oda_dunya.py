@@ -13,6 +13,7 @@ import argparse
 import json
 import math
 import os
+import shutil
 import sys
 import xml.etree.ElementTree as ET
 import numpy as np
@@ -386,6 +387,184 @@ def mesh_sadelestir(giris_yol, cikis_yol, hedef_ucgen=20000):
     )
 
 
+def ogre_isiksiz_malzeme_metni(malzeme_adi, doku_dosya):
+    """Tek bir doku için ışıksız (lighting off) OGRE malzeme tanımı döndürür."""
+    return (
+        f"material {malzeme_adi}\n{{\n  technique\n  {{\n    pass\n    {{\n"
+        f"      lighting off\n"
+        f"      texture_unit\n      {{\n        texture {doku_dosya}\n"
+        f"        filtering trilinear\n      }}\n    }}\n  }}\n}}\n"
+    )
+
+
+def mtl_isiksiz_olustur(giris_mtl_yolu, cikis_mtl_yolu):
+    """
+    MTL dosyasının ışıksız (unlit) eşdeğerini yazar:
+    Her malzemede Ka = Kd = orijinal Kd ve Ks = 0 0 0 yapılır.
+    Dönüş: dönüştürülen malzeme sayısı.
+    """
+    if not os.path.isfile(giris_mtl_yolu):
+        return 0
+
+    with open(giris_mtl_yolu, "r", encoding="utf-8") as f:
+        satirlar = f.readlines()
+
+    kd_haritasi = {}
+    aktif_mtl = None
+    for satir in satirlar:
+        parcalar = satir.strip().split()
+        if len(parcalar) >= 2 and parcalar[0] == "newmtl":
+            aktif_mtl = parcalar[1]
+        elif aktif_mtl is not None and len(parcalar) >= 4 and parcalar[0] == "Kd":
+            kd_haritasi[aktif_mtl] = " ".join(parcalar[1:4])
+
+    cikis_satirlar = []
+    aktif_mtl = None
+    ka_yazildi = False
+
+    for satir in satirlar:
+        parcalar = satir.strip().split()
+        if len(parcalar) >= 2 and parcalar[0] == "newmtl":
+            aktif_mtl = parcalar[1]
+            ka_yazildi = False
+            cikis_satirlar.append(satir)
+        elif aktif_mtl is not None and len(parcalar) >= 4 and parcalar[0] == "Ka":
+            kd_deger = kd_haritasi.get(aktif_mtl, " ".join(parcalar[1:4]))
+            cikis_satirlar.append(f"Ka {kd_deger}\n")
+            ka_yazildi = True
+        elif aktif_mtl is not None and len(parcalar) >= 4 and parcalar[0] == "Kd":
+            kd_deger = kd_haritasi.get(aktif_mtl, " ".join(parcalar[1:4]))
+            if not ka_yazildi:
+                cikis_satirlar.append(f"Ka {kd_deger}\n")
+                ka_yazildi = True
+            cikis_satirlar.append(f"Kd {kd_deger}\n")
+        elif aktif_mtl is not None and len(parcalar) >= 4 and parcalar[0] == "Ks":
+            cikis_satirlar.append("Ks 0.0000 0.0000 0.0000\n")
+        else:
+            cikis_satirlar.append(satir)
+
+    cikis_dizin = os.path.dirname(os.path.abspath(cikis_mtl_yolu))
+    if cikis_dizin:
+        os.makedirs(cikis_dizin, exist_ok=True)
+    with open(cikis_mtl_yolu, "w", encoding="utf-8") as f:
+        f.writelines(cikis_satirlar)
+
+    return len(kd_haritasi)
+
+
+def obj_mtllib_degistir(obj_yolu, yeni_mtl_adi):
+    """OBJ dosyasındaki mtllib satırını yeni_mtl_adi ile değiştirir."""
+    if not os.path.isfile(obj_yolu):
+        return
+    with open(obj_yolu, "r", encoding="utf-8") as f:
+        satirlar = f.readlines()
+
+    degisti = False
+    yeni_satirlar = []
+    for satir in satirlar:
+        if satir.lstrip().startswith("mtllib "):
+            yeni_satirlar.append(f"mtllib {yeni_mtl_adi}\n")
+            degisti = True
+        else:
+            yeni_satirlar.append(satir)
+
+    if not degisti:
+        yeni_satirlar.insert(0, f"mtllib {yeni_mtl_adi}\n")
+
+    with open(obj_yolu, "w", encoding="utf-8") as f:
+        f.writelines(yeni_satirlar)
+
+
+def doku_png_bul(doku_dizin_abs, aday_bagil_yollar):
+    """Doku dizini altında aday bağıl yollardan var olan ilk PNG dosyasını döndürür."""
+    if not doku_dizin_abs:
+        return None
+    for bagil in aday_bagil_yollar:
+        if not bagil:
+            continue
+        tam_yol = os.path.join(doku_dizin_abs, bagil)
+        if os.path.isfile(tam_yol):
+            return tam_yol
+    return None
+
+
+def _renk_uclu_coz(deger):
+    """[r, g, b] listesini veya sözlüğünü 0..1 aralığında (r, g, b) üçlüsüne çevirir."""
+    if isinstance(deger, dict):
+        for anahtar in ("renk", "rgb", "color"):
+            if anahtar in deger:
+                return _renk_uclu_coz(deger[anahtar])
+        if all(k in deger for k in ("r", "g", "b")):
+            vals = [float(deger["r"]), float(deger["g"]), float(deger["b"])]
+            olcek = 255.0 if max(vals) > 1.0 else 1.0
+            return (vals[0] / olcek, vals[1] / olcek, vals[2] / olcek)
+        return None
+    if isinstance(deger, (list, tuple)) and len(deger) >= 3:
+        try:
+            vals = [float(deger[0]), float(deger[1]), float(deger[2])]
+            olcek = 255.0 if max(vals) > 1.0 else 1.0
+            return (
+                min(max(vals[0] / olcek, 0.0), 1.0),
+                min(max(vals[1] / olcek, 0.0), 1.0),
+                min(max(vals[2] / olcek, 0.0), 1.0),
+            )
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def tavan_rengi_belirle(doku_veri, doku_dizin_abs, varsayilan_renk):
+    """
+    Tavan rengini (r, g, b) 0..1 olarak belirler:
+    1. doku.yaml içinde tavan rengi varsa onu kullanır.
+    2. Yoksa duvar doku PNG'lerinin üst şeridinden (z ~ tavan) medyan rengi hesaplar.
+    3. Hiçbiri yoksa varsayilan_renk döndürür.
+    """
+    if isinstance(doku_veri, dict):
+        for anahtar in ("tavan", "tavan_rengi"):
+            if anahtar in doku_veri:
+                cozulen = _renk_uclu_coz(doku_veri[anahtar])
+                if cozulen is not None:
+                    return cozulen
+
+    if doku_dizin_abs and isinstance(doku_veri, dict):
+        try:
+            import cv2
+
+            ust_ornekler = []
+            doku_duvarlar = doku_veri.get("duvarlar") or []
+            duvar_iter = (
+                doku_duvarlar
+                if isinstance(doku_duvarlar, list)
+                else list(doku_duvarlar.values())
+            )
+            for idx, doku_d in enumerate(duvar_iter):
+                bagil = (
+                    doku_d.get("doku", f"doku/duvar_{idx}.png")
+                    if isinstance(doku_d, dict)
+                    else f"doku/duvar_{idx}.png"
+                )
+                png_adi = os.path.basename(bagil) or f"duvar_{idx}.png"
+                png_yolu = doku_png_bul(
+                    doku_dizin_abs,
+                    [os.path.join("materials", "textures", png_adi), bagil, os.path.join("doku", png_adi)],
+                )
+                if png_yolu:
+                    bgr = cv2.imread(png_yolu, cv2.IMREAD_COLOR)
+                    if bgr is not None and bgr.shape[0] > 0 and bgr.shape[1] > 0:
+                        ust_h = max(1, bgr.shape[0] // 10)
+                        ust_dilim = bgr[:ust_h, :, :].reshape(-1, 3).astype(float) / 255.0
+                        ust_ornekler.append(np.median(ust_dilim, axis=0))
+            if ust_ornekler:
+                med_bgr = np.median(np.vstack(ust_ornekler), axis=0)
+                if 0.05 <= float(np.mean(med_bgr)) <= 0.98:
+                    return (float(med_bgr[2]), float(med_bgr[1]), float(med_bgr[0]))
+        except Exception:
+            pass
+
+    return varsayilan_renk
+
+
 def dunya_uret(
     yapi_yol,
     mesh_dizin,
@@ -396,6 +575,7 @@ def dunya_uret(
     doku_dizin=None,
     carpisma_mesh=None,
     mesh_duvar_kes=0.08,
+    isikli=False,
 ):
     """Girdi yapı ve mesh verilerini okuyarak Gazebo SDF dünyası üretir."""
     # 1. Yapı dosyasını oku
@@ -427,6 +607,7 @@ def dunya_uret(
 
     # 3. Mesh dosyalarını kontrol et ve meta veriyi oku
     mesh_dizin_abs = os.path.abspath(mesh_dizin)
+    os.makedirs(mesh_dizin_abs, exist_ok=True)
     obj_yolu = os.path.join(mesh_dizin_abs, "oda_mesh.obj")
     json_yolu = os.path.join(mesh_dizin_abs, "oda_mesh.json")
 
@@ -474,6 +655,9 @@ def dunya_uret(
 
     # 5. XML / SDF bloklarını oluştur
     modeller_xml = []
+    isiksiz_malzeme_bloklari = []
+    duvar_obj_sayisi = 0
+    isiksiz_mtl_malzeme_sayisi = 0
 
     # Zemin modeli
     zemin_doku_visual_xml = ""
@@ -483,6 +667,12 @@ def dunya_uret(
         zemin_malzeme = (
             doku_zemin.get("malzeme", "Oda/zemin") if isinstance(doku_zemin, dict) else "Oda/zemin"
         )
+        zemin_doku_bagil = (
+            doku_zemin.get("doku", "doku/zemin.png")
+            if isinstance(doku_zemin, dict)
+            else "doku/zemin.png"
+        )
+        zemin_png_adi = os.path.basename(zemin_doku_bagil) or "zemin.png"
 
         doku_zemin_bx = zemin_boy_x
         doku_zemin_by = zemin_boy_y
@@ -505,19 +695,37 @@ def dunya_uret(
             doku_zemin_dx = float(zemin_kutu.get("dx", 0.0))
             doku_zemin_dy = float(zemin_kutu.get("dy", 0.0))
 
-        zemin_png = os.path.join(doku_dizin_abs, "materials", "textures", "zemin.png")
-        if isinstance(zemin_kutu, (list, tuple)) and len(zemin_kutu) == 4 and os.path.isfile(zemin_png):
+        zemin_png = doku_png_bul(
+            doku_dizin_abs,
+            [
+                os.path.join("materials", "textures", zemin_png_adi),
+                zemin_doku_bagil,
+                os.path.join("doku", zemin_png_adi),
+            ],
+        )
+        zemin_aktif_malzeme = "Oda/isiksiz/zemin" if not isikli else zemin_malzeme
+        if not isikli:
+            isiksiz_malzeme_bloklari.append(
+                ogre_isiksiz_malzeme_metni("Oda/isiksiz/zemin", zemin_png_adi)
+            )
+
+        if isinstance(zemin_kutu, (list, tuple)) and len(zemin_kutu) == 4:
             # Kutu üst yüzünün Gazebo UV eşlemesi belirsiz (simde doku dönük/ölçeksiz çıktı, 27.10 denemesi):
             # zemin, köşe başına açık UV'li OBJ dörtgeni. Doku satır 0 = ymax (oda_doku.py) = OBJ v=1.
-            import shutil
-            shutil.copy(zemin_png, os.path.join(mesh_dizin_abs, "zemin.png"))
-            with open(os.path.join(mesh_dizin_abs, "zemin_doku.mtl"), "w") as f:
-                f.write("newmtl zemin\nKa 1 1 1\nKd 1 1 1\nKs 0 0 0\nmap_Kd zemin.png\n")
-            with open(os.path.join(mesh_dizin_abs, "zemin_doku.obj"), "w") as f:
+            if zemin_png:
+                hedef_zemin_png = os.path.join(mesh_dizin_abs, zemin_png_adi)
+                if os.path.abspath(zemin_png) != os.path.abspath(hedef_zemin_png):
+                    shutil.copy(zemin_png, hedef_zemin_png)
+            with open(os.path.join(mesh_dizin_abs, "zemin_doku.mtl"), "w", encoding="utf-8") as f:
+                f.write(f"newmtl zemin\nKa 1 1 1\nKd 1 1 1\nKs 0 0 0\nmap_Kd {zemin_png_adi}\n")
+            with open(os.path.join(mesh_dizin_abs, "zemin_doku.obj"), "w", encoding="utf-8") as f:
                 f.write("mtllib zemin_doku.mtl\no zemin\n")
                 for x, y in ((xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)):
                     f.write(f"v {x:.4f} {y:.4f} 0.0\n")
-                f.write("vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nvn 0 0 1\nusemtl zemin\nf 1/1/1 2/2/1 3/3/1\nf 1/1/1 3/3/1 4/4/1\n")
+                f.write(
+                    "vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nvn 0 0 1\nusemtl zemin\n"
+                    "f 1/1/1 2/2/1 3/3/1\nf 1/1/1 3/3/1 4/4/1\n"
+                )
             zemin_doku_visual_xml = f"""
         <!-- Doku: dünya koordinatlı OBJ dörtgeni; link (merkez, z=-0.01) telafisiyle dünyada z=0.001 -->
         <visual name="visual_doku">
@@ -527,6 +735,13 @@ def dunya_uret(
               <uri>file://{mesh_dizin_abs}/zemin_doku.obj</uri>
             </mesh>
           </geometry>
+          <material>
+            <script>
+              <uri>file://{doku_dizin_abs}/materials/scripts</uri>
+              <uri>file://{doku_dizin_abs}/materials/textures</uri>
+              <name>{zemin_aktif_malzeme}</name>
+            </script>
+          </material>
         </visual>"""
         else:
             zemin_doku_visual_xml = f"""
@@ -542,11 +757,12 @@ def dunya_uret(
             <script>
               <uri>file://{doku_dizin_abs}/materials/scripts</uri>
               <uri>file://{doku_dizin_abs}/materials/textures</uri>
-              <name>{zemin_malzeme}</name>
+              <name>{zemin_aktif_malzeme}</name>
             </script>
           </material>
         </visual>"""
 
+    zemin_amb = (zr, zg, zb) if not isikli else (0.6 * zr, 0.6 * zg, 0.6 * zb)
     zemin_xml = f"""    <!-- Zemin Modeli -->
     <model name="zemin">
       <static>true</static>
@@ -574,7 +790,7 @@ def dunya_uret(
             </box>
           </geometry>
           <material>
-            <ambient>{0.6*zr:.4f} {0.6*zg:.4f} {0.6*zb:.4f} 1.0</ambient>
+            <ambient>{zemin_amb[0]:.4f} {zemin_amb[1]:.4f} {zemin_amb[2]:.4f} 1.0</ambient>
             <diffuse>{zr:.4f} {zg:.4f} {zb:.4f} 1.0</diffuse>
           </material>
         </visual>{zemin_doku_visual_xml}
@@ -583,6 +799,13 @@ def dunya_uret(
     modeller_xml.append(zemin_xml)
 
     # Tavan modeli
+    varsayilan_tavan_renk = (
+        (dr, dg, db)
+        if "duvar_rengi_tahmini" in mesh_meta
+        else ((0.62, 0.62, 0.62) if not isikli else (0.92, 0.92, 0.92))
+    )
+    tr, tg, tb = tavan_rengi_belirle(doku_veri, doku_dizin_abs, varsayilan_tavan_renk)
+    tavan_amb = (tr, tg, tb) if not isikli else (0.6 * tr, 0.6 * tg, 0.6 * tb)
     tavan_z = tavan + 0.01
     tavan_xml = f"""    <!-- Tavan Modeli -->
     <model name="tavan">
@@ -603,8 +826,8 @@ def dunya_uret(
             </box>
           </geometry>
           <material>
-            <ambient>0.552 0.552 0.552 1.0</ambient>
-            <diffuse>0.92 0.92 0.92 1.0</diffuse>
+            <ambient>{tavan_amb[0]:.4f} {tavan_amb[1]:.4f} {tavan_amb[2]:.4f} 1.0</ambient>
+            <diffuse>{tr:.4f} {tg:.4f} {tb:.4f} 1.0</diffuse>
           </material>
         </visual>
       </link>
@@ -630,10 +853,8 @@ def dunya_uret(
         mz = tavan / 2.0
         yaw = math.atan2(dy, dx)
 
-        # Doku görseli kontrolü
-        duvar_doku_visual_xml = ""
+        doku_d = None
         if doku_duvarlar is not None:
-            doku_d = None
             if isinstance(doku_duvarlar, list) and i < len(doku_duvarlar):
                 doku_d = doku_duvarlar[i]
             elif isinstance(doku_duvarlar, dict):
@@ -643,48 +864,143 @@ def dunya_uret(
                     or doku_duvarlar.get(f"duvar_{i}")
                 )
 
-            if doku_d is not None:
-                malzeme = (
-                    doku_d.get("malzeme", f"Oda/duvar_{i}")
-                    if isinstance(doku_d, dict)
-                    else f"Oda/duvar_{i}"
-                )
-                yuz_normali = doku_d.get("yuz_normali") if isinstance(doku_d, dict) else None
+        if doku_d is not None:
+            malzeme = (
+                doku_d.get("malzeme", f"Oda/duvar_{i}")
+                if isinstance(doku_d, dict)
+                else f"Oda/duvar_{i}"
+            )
+            doku_bagil = (
+                doku_d.get("doku", f"doku/duvar_{i}.png")
+                if isinstance(doku_d, dict)
+                else f"doku/duvar_{i}.png"
+            )
+            duvar_png_adi = os.path.basename(doku_bagil) or f"duvar_{i}.png"
 
-                # Yüz normaline göre yerel y eksenindeki işaret (+1 veya -1)
-                # Duvar yerel y ekseni vektörü: (-sin(yaw), cos(yaw))
-                sign = 1.0
-                if yuz_normali is not None:
-                    if isinstance(yuz_normali, (list, tuple, dict)):
-                        nx, ny = nokta_al(yuz_normali)
-                        dot = nx * (-math.sin(yaw)) + ny * math.cos(yaw)
-                        sign = 1.0 if dot >= 0 else -1.0
-                    else:
-                        try:
-                            sign = 1.0 if float(yuz_normali) >= 0 else -1.0
-                        except (ValueError, TypeError):
-                            sign = 1.0
+            p1_d = np.array(
+                nokta_al(doku_d.get("p1", p1) if isinstance(doku_d, dict) else p1),
+                dtype=float,
+            )
+            p2_d = np.array(
+                nokta_al(doku_d.get("p2", p2) if isinstance(doku_d, dict) else p2),
+                dtype=float,
+            )
+            vec = p2_d - p1_d
+            vec_boy = float(np.hypot(vec[0], vec[1]))
+            doku_uzunluk = float(d.get("uzunluk", vec_boy))
+            u = vec / vec_boy if vec_boy > 1e-9 else np.array([1.0, 0.0], dtype=float)
+
+            yuz_normali = doku_d.get("yuz_normali") if isinstance(doku_d, dict) else None
+            if yuz_normali is not None and isinstance(yuz_normali, (list, tuple, dict)):
+                nx, ny = nokta_al(yuz_normali)
+                n_boy = math.hypot(nx, ny)
+                if n_boy > 1e-9:
+                    n_ic = np.array([nx / n_boy, ny / n_boy], dtype=float)
                 else:
-                    # Normal verilmediyse oda merkezine bakan tarafı seç
-                    dot = (zemin_merkez_x - mx) * (-math.sin(yaw)) + (zemin_merkez_y - my) * math.cos(yaw)
-                    sign = 1.0 if dot >= 0 else -1.0
+                    n_ic = np.array([-u[1], u[0]], dtype=float)
+            else:
+                n_a = np.array([-u[1], u[0]], dtype=float)
+                orta = 0.5 * (p1_d + p2_d)
+                dot = (zemin_merkez_x - orta[0]) * n_a[0] + (zemin_merkez_y - orta[1]) * n_a[1]
+                n_ic = n_a if dot >= 0.0 else -n_a
 
-                offset_y = sign * (kalinlik / 2.0 + 0.001)
-                duvar_doku_visual_xml = f"""
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
-        <visual name="visual_doku">
-          <pose>0 {offset_y:.4f} 0 0 0 0</pose>
+            p1_yuz = p1_d + 0.5 * kalinlik * n_ic
+            p2_yuz = p1_yuz + doku_uzunluk * u
+            p1_arka = p1_yuz - kalinlik * n_ic
+            p2_arka = p2_yuz - kalinlik * n_ic
+
+            # Ön yüz (1..4) ve arka yüz (5..8) köşeleri
+            v1 = (p1_yuz[0], p1_yuz[1], 0.0)
+            v2 = (p2_yuz[0], p2_yuz[1], 0.0)
+            v3 = (p2_yuz[0], p2_yuz[1], float(tavan))
+            v4 = (p1_yuz[0], p1_yuz[1], float(tavan))
+            v5 = (p1_arka[0], p1_arka[1], 0.0)
+            v6 = (p2_arka[0], p2_arka[1], 0.0)
+            v7 = (p2_arka[0], p2_arka[1], float(tavan))
+            v8 = (p1_arka[0], p1_arka[1], float(tavan))
+
+            e1 = np.array([v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]], dtype=float)
+            e2 = np.array([v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]], dtype=float)
+            cross = np.cross(e1, e2)
+            n_ic_3b = np.array([n_ic[0], n_ic[1], 0.0], dtype=float)
+            if float(np.dot(cross, n_ic_3b)) >= 0.0:
+                on_yuz_f = "f 1/1/1 2/2/1 3/3/1\nf 1/1/1 3/3/1 4/4/1\n"
+                arka_yuz_f = "f 5/2/2 7/4/2 6/1/2\nf 5/2/2 8/3/2 7/4/2\n"
+            else:
+                on_yuz_f = "f 1/1/1 3/3/1 2/2/1\nf 1/1/1 4/4/1 3/3/1\n"
+                arka_yuz_f = "f 5/2/2 6/1/2 7/4/2\nf 5/2/2 7/4/2 8/3/2\n"
+
+            duvar_png_kaynak = doku_png_bul(
+                doku_dizin_abs,
+                [
+                    os.path.join("materials", "textures", duvar_png_adi),
+                    doku_bagil,
+                    os.path.join("doku", duvar_png_adi),
+                ],
+            )
+            if duvar_png_kaynak:
+                hedef_png = os.path.join(mesh_dizin_abs, duvar_png_adi)
+                if os.path.abspath(duvar_png_kaynak) != os.path.abspath(hedef_png):
+                    shutil.copy(duvar_png_kaynak, hedef_png)
+
+            mtl_dosya = f"duvar_doku_{i}.mtl"
+            obj_dosya = f"duvar_doku_{i}.obj"
+            with open(os.path.join(mesh_dizin_abs, mtl_dosya), "w", encoding="utf-8") as f:
+                f.write(
+                    f"newmtl duvar_{i}\nKa 1 1 1\nKd 1 1 1\nKs 0 0 0\nmap_Kd {duvar_png_adi}\n"
+                )
+            with open(os.path.join(mesh_dizin_abs, obj_dosya), "w", encoding="utf-8") as f:
+                f.write(f"mtllib {mtl_dosya}\no duvar_{i}\n")
+                for vx, vy, vz in (v1, v2, v3, v4, v5, v6, v7, v8):
+                    f.write(f"v {vx:.4f} {vy:.4f} {vz:.4f}\n")
+                f.write("vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\n")
+                f.write(f"vn {n_ic[0]:.4f} {n_ic[1]:.4f} 0.0000\n")
+                f.write(f"vn {-n_ic[0]:.4f} {-n_ic[1]:.4f} 0.0000\n")
+                f.write(f"usemtl duvar_{i}\n")
+                f.write(on_yuz_f)
+                f.write(arka_yuz_f)
+
+            duvar_obj_sayisi += 1
+            duvar_aktif_malzeme = f"Oda/isiksiz/duvar_{i}" if not isikli else malzeme
+            if not isikli:
+                isiksiz_malzeme_bloklari.append(
+                    ogre_isiksiz_malzeme_metni(f"Oda/isiksiz/duvar_{i}", duvar_png_adi)
+                )
+
+            # Link pozunu (mx, my, mz, 0, 0, yaw) telafi ederek dünya koordinatlı OBJ'yi çiz
+            cos_y = math.cos(yaw)
+            sin_y = math.sin(yaw)
+            vis_x = -(mx * cos_y + my * sin_y)
+            vis_y = mx * sin_y - my * cos_y
+            vis_z = -mz
+            vis_yaw = -yaw
+
+            duvar_visual_xml = f"""        <visual name="visual_doku">
+          <pose>{vis_x:.4f} {vis_y:.4f} {vis_z:.4f} 0 0 {vis_yaw:.4f}</pose>
           <geometry>
-            <box>
-              <size>{uzunluk:.4f} 0.0020 {yukseklik:.4f}</size>
-            </box>
+            <mesh>
+              <uri>file://{mesh_dizin_abs}/{obj_dosya}</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>file://{doku_dizin_abs}/materials/scripts</uri>
               <uri>file://{doku_dizin_abs}/materials/textures</uri>
-              <name>{malzeme}</name>
+              <name>{duvar_aktif_malzeme}</name>
             </script>
+          </material>
+        </visual>"""
+        else:
+            duvar_amb = (dr, dg, db) if not isikli else (0.6 * dr, 0.6 * dg, 0.6 * db)
+            duvar_visual_xml = f"""        <visual name="visual">
+          <geometry>
+            <box>
+              <size>{uzunluk:.4f} {genislik:.4f} {yukseklik:.4f}</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>{duvar_amb[0]:.4f} {duvar_amb[1]:.4f} {duvar_amb[2]:.4f} 1.0</ambient>
+            <diffuse>{dr:.4f} {dg:.4f} {db:.4f} 1.0</diffuse>
           </material>
         </visual>"""
 
@@ -697,17 +1013,7 @@ def dunya_uret(
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>{uzunluk:.4f} {genislik:.4f} {yukseklik:.4f}</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>{0.6*dr:.4f} {0.6*dg:.4f} {0.6*db:.4f} 1.0</ambient>
-            <diffuse>{dr:.4f} {dg:.4f} {db:.4f} 1.0</diffuse>
-          </material>
-        </visual>{duvar_doku_visual_xml}
+{duvar_visual_xml}
       </link>"""
         duvar_linkleri.append(link_xml)
 
@@ -720,11 +1026,19 @@ def dunya_uret(
     </model>"""
         modeller_xml.append(duvarlar_xml)
 
+    # Işıksız OGRE malzeme betiğini yaz (oda_isiksiz.material)
+    if doku_dizin_abs and not isikli and isiksiz_malzeme_bloklari:
+        scripts_dizin = os.path.join(doku_dizin_abs, "materials", "scripts")
+        os.makedirs(scripts_dizin, exist_ok=True)
+        isiksiz_mat_yolu = os.path.join(scripts_dizin, "oda_isiksiz.material")
+        with open(isiksiz_mat_yolu, "w", encoding="utf-8") as f:
+            f.write("\n".join(isiksiz_malzeme_bloklari))
+
     # Mobilya mesh modeli
     if mesh_var:
         gorsel_obj_yolu = obj_yolu
+        kesik_obj_yolu = os.path.join(mesh_dizin_abs, "oda_mesh_kesik.obj")
         if mesh_duvar_kes > 0:
-            kesik_obj_yolu = os.path.join(mesh_dizin_abs, "oda_mesh_kesik.obj")
             mesh_duvar_yuzeylerini_kes(
                 giris_obj_yolu=obj_yolu,
                 cikis_obj_yolu=kesik_obj_yolu,
@@ -732,6 +1046,18 @@ def dunya_uret(
                 pay=mesh_duvar_kes,
             )
             gorsel_obj_yolu = kesik_obj_yolu
+        elif not isikli:
+            shutil.copy(obj_yolu, kesik_obj_yolu)
+            gorsel_obj_yolu = kesik_obj_yolu
+
+        if not isikli:
+            giris_mtl_yolu = os.path.join(mesh_dizin_abs, "oda_mesh.mtl")
+            isiksiz_mtl_yolu = os.path.join(mesh_dizin_abs, "oda_mesh_isiksiz.mtl")
+            if os.path.isfile(giris_mtl_yolu):
+                isiksiz_mtl_malzeme_sayisi = mtl_isiksiz_olustur(
+                    giris_mtl_yolu, isiksiz_mtl_yolu
+                )
+                obj_mtllib_degistir(gorsel_obj_yolu, "oda_mesh_isiksiz.mtl")
 
         carpisma_obj_yolu = obj_yolu
         if carpisma_mesh:
@@ -857,6 +1183,7 @@ def dunya_uret(
     tum_modeller_metni = "\n".join(modeller_xml)
 
     # 6. İç mekân ışıklarını oluştur
+    isik_diffuse_metni = "0.0 0.0 0.0 1" if not isikli else "0.2 0.2 0.2 1"
     isik_bloklari = []
     if isik_aralik > 0:
         isik_z = tavan - 0.15
@@ -885,7 +1212,7 @@ def dunya_uret(
         for idx, (lx, ly) in enumerate(isik_noktalari):
             light_xml = f"""    <light type="point" name="ic_isik_{idx}">
       <pose>{lx:.4f} {ly:.4f} {isik_z:.4f} 0 0 0</pose>
-      <diffuse>0.2 0.2 0.2 1</diffuse>
+      <diffuse>{isik_diffuse_metni}</diffuse>
       <specular>0.1 0.1 0.1 1</specular>
       <attenuation>
         <range>8</range>
@@ -903,6 +1230,8 @@ def dunya_uret(
     else:
         isiklar_xml = "    <!-- Ic mekan isiklari: 0 adet (isik eklenmedi) -->"
 
+    sahne_ambient_metni = "1 1 1 1" if not isikli else "0.25 0.25 0.25 1"
+
     # 7. Tam SDF dünya içeriğini derle
     sdf_icerik = f"""<?xml version="1.0" ?>
 <!--
@@ -919,7 +1248,7 @@ def dunya_uret(
       <uri>model://sun</uri>
     </include>
     <scene>
-      <ambient>0.25 0.25 0.25 1</ambient>
+      <ambient>{sahne_ambient_metni}</ambient>
       <background>0.7 0.7 0.7 1</background>
       <shadows>false</shadows>
     </scene>
@@ -948,6 +1277,14 @@ def dunya_uret(
 
     with open(cikti_abs, "w", encoding="utf-8") as f:
         f.write(sdf_icerik)
+
+    isiksiz_doku_sayisi = len(isiksiz_malzeme_bloklari)
+    toplam_isiksiz_malzeme = isiksiz_doku_sayisi + isiksiz_mtl_malzeme_sayisi
+    print(
+        f"Dünya üretildi: yazılan duvar OBJ sayısı={duvar_obj_sayisi}, "
+        f"ışıksız malzeme sayısı={toplam_isiksiz_malzeme} "
+        f"(doku={isiksiz_doku_sayisi}, mesh_mtl={isiksiz_mtl_malzeme_sayisi})"
+    )
 
 
 def ana():
@@ -990,6 +1327,11 @@ def ana():
         help="Duvar kutularıyla çakışan mesh yüzeylerini kesme payı (m). 0 = kapalı, varsayılan 0.08",
     )
     parser.add_argument(
+        "--isikli",
+        action="store_true",
+        help="Eski ışıklı sahne ve malzeme ayarlarını kullan (varsayılan: ışıksız/unlit)",
+    )
+    parser.add_argument(
         "--sadelestir",
         nargs=2,
         metavar=("GIRIS", "CIKIS"),
@@ -1022,6 +1364,7 @@ def ana():
         doku_dizin=args.doku_dizin,
         carpisma_mesh=args.carpisma_mesh,
         mesh_duvar_kes=args.mesh_duvar_kes,
+        isikli=args.isikli,
     )
 
 
