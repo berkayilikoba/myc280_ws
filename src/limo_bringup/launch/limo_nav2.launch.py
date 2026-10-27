@@ -78,6 +78,10 @@ def generate_launch_description():
             description='Lifecycle düğümlerini otomatik başlat'),
 
         DeclareLaunchArgument(
+            'derinlik_bulut', default_value='true',
+            description='D435 derinliğinden /camera/depth/points üret (voxel_layer, collision_monitor)'),
+
+        DeclareLaunchArgument(
             'mode', default_value='ackermann',
             choices=['ackermann', 'diff'],
             description='Sürüş modu. Parametre dosyasını ve davranış ağaçlarını seçer.'),
@@ -205,6 +209,19 @@ def generate_launch_description():
             parameters=[configured_params],
             arguments=['--ros-args', '--log-level', log_level],
             remappings=remappings + [('cmd_vel', 'cmd_vel_nav')]),
+
+        # D435 derinliği -> nokta bulutu (yerel costmap voxel_layer ve collision_monitor 'depth' kaynağı).
+        # 2B lidar ~8 cm'de kesit görüyor; sandalye oturağı / raf çıkıntısı yalnız kamerada var.
+        Node(
+            condition=IfCondition(LaunchConfiguration('derinlik_bulut')),
+            package='depth_image_proc',
+            executable='point_cloud_xyz_node',
+            name='derinlik_bulut',
+            output='screen',
+            parameters=[{'use_sim_time': use_sim_time}],
+            remappings=[('image_rect', '/camera/depth/image_raw'),
+                        ('camera_info', '/camera/depth/camera_info'),
+                        ('points', '/camera/depth/points')]),
 
         # Zincirin sonu. Nav2'den bağımsız çalışır: engel yakınsa cmd_vel'i keser.
         Node(

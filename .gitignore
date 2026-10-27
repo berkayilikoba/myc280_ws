@@ -14,3 +14,6 @@ __pycache__/
 saha/oda/cikti/
 saha/oda/agy_*.log
 saha/oda/*.log
+saha/nav/cikti/
+saha/nav/cikti_*.log
+saha/*/agy_*.log

@@ -1,0 +1,21 @@
+# LIMO + myCobot görev yöneticisi nesne ve istasyon konumları (lab_oda haritası)
+# Harita çerçevesi (map): robot başlangıç (0, 0, 0)
+ev:
+  x: 0.0
+  y: 0.0
+  yaw_derece: 0.0
+
+birakma:
+  x: 0.0
+  y: 0.0
+  yaw_derece: 0.0
+
+nesneler:
+  elma:
+    x: 0.23
+    y: 1.40
+    z: 0.75
+  kutu:
+    x: 3.73
+    y: 2.18
+    z: 0.30
