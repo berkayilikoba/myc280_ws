@@ -71,6 +71,17 @@ ivme 12 rad/s² (4 kayıt, R² ort 0.937, önceki 0.925); derinlikte zemin geçe
 | w tepki gecikmesi | 0.04 s | 0.36 s | 0.26 s |
 | Toplam dönüş | 1792.2° | 1792.5° | 1792.3° |
 
-Derinlik: boşluk önce geliş açısına bağlıydı → sim geçerli oranı 0.25'e düştü (gerçek 0.59; sıyırma açısındaki yan
-duvar gerçekte geçerli). Yalnız zemine uygulanacak şekilde düzeltildi, birim testleri geçiyor; **simde
-doğrulanmadı** (son oynatma bitmeden kapatıldı). Sıradaki ilk iş: oynatmayı tekrarlayıp ölçmek.
+Derinlik: boşluk önce geliş açısına bağlıydı → sim geçerli oranı 0.25'e düştü (sıyırma açısındaki yan duvar
+gerçekte geçerli). Yalnız zemine uygulandı ve simde doğrulandı (başlangıç karesi, satır bandına göre geçerli oran):
+
+| bant | gerçek | sim |
+|---|---|---|
+| zemin (alt) | 0.17 | 0.17 |
+| ufuk çevresi | 0.54 | 0.44 |
+| duvar/mobilya | 0.91 | 0.73 |
+| üst (0.6 m üstü) | 0.75 | 0.16 |
+| **simde geometri olan bölge** | **0.50** | **0.51** |
+
+Sensör modeli tutuyor; toplam fark (0.59 / 0.34) sahneden: sim odası 0.6 m'lik kutular, üstünde duvar/tavan yok.
+Sıradaki: dünyada duvarları tavana kadar yükseltmek (`harita_dunya.py --yukseklik 2.5`, ama mobilya kesitleri de
+uzar → duvar/mobilya ayrımı gerekir) ve doku.
