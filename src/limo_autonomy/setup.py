@@ -23,5 +23,7 @@ setup(
     entry_points={'console_scripts': [
         'patrol = limo_autonomy.patrol_node:main',
         'kavrama = limo_autonomy.kavrama_dugumu:main',
+        'sahte_algi = limo_autonomy.sahte_algi:main',
+        'gorev = limo_autonomy.gorev_dugumu:main',
     ]},
 )

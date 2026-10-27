@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Nav2 ölçüm koşusu: sabit bir hedef turunu sürer, sonuçları JSON'a yazar.
+"""Nav2 ölçüm koşusu: hedef turunu sürer, sonuçları JSON/YAML'a yazar.
 
 Simülasyonda /odom_gercek (diff, 27.10.2026'dan beri; yoksa /odom) Gazebo'nun GERÇEK konumudur (diff_drive ve ackermann_drive
 eklentilerinde odometry_source=1). Harita dünya dosyasından üretildiği ve robot
@@ -7,25 +7,29 @@ eklentilerinde odometry_source=1). Harita dünya dosyasından üretildiği ve ro
 /odom'dan ölçülür, AMCL'in kendi tahmininden değil.
 
 Her hedef için ölçülenler:
-  status          SUCCEEDED / FAILED / CANCELED / TIMEOUT
-  sim_time_s      hedefe gidiş süresi (simülasyon saati)
-  recoveries      Nav2 feedback.number_of_recoveries (en büyük değer)
-  pos_err_m       son konumun hedefe uzaklığı (gerçek konum)
-  yaw_err_deg     son yönelim hatası
-  path_len_m      gerçek konumdan birikmiş yol uzunluğu
-  min_clear_m     tarama noktalarının footprint poligonuna en küçük uzaklığı
-                  (sim LiDAR range_min 0.2 m — lazerin çok yakını kör nokta)
-  reverse_s       geri vites (cmd_vel linear.x < -0.01) süresi
-  planner_fail    /rosout'ta "failed to create plan" sayısı
-  ctrl_fail       /rosout'ta controller_server ERROR sayısı
+  status                       SUCCEEDED / FAILED / CANCELED / TIMEOUT
+  sim_time_s / sure_s          hedefe gidiş süresi (simülasyon saati)
+  recoveries / kurtarma_sayisi Nav2 feedback.number_of_recoveries (en büyük değer)
+  pos_err_m                    son konumun hedefe uzaklığı (gerçek konum)
+  yaw_err_deg                  son yönelim hatası
+  varis_hatasi_gercek_m        hedef ↔ /odom_gercek (Nav2 SUCCEEDED anında gerçek varış hatası)
+  varis_yon_hatasi_gercek_deg  hedef ↔ /odom_gercek gerçek yön hatası (derece)
+  lokalizasyon_hatasi_m        o anda map->base_footprint TF ile /odom_gercek arasındaki fark
+  path_len_m                   gerçek konumdan birikmiş yol uzunluğu
+  min_clear_m / min_aciklik_m  tarama noktalarının footprint poligonuna en küçük uzaklığı
+                               (sim LiDAR range_min 0.2 m — lazerin çok yakını kör nokta)
+  reverse_s                    geri vites (cmd_vel linear.x < -0.01) süresi
+  planner_fail                 /rosout'ta "failed to create plan" sayısı
+  ctrl_fail                    /rosout'ta controller_server ERROR sayısı
 
 Kullanım:
-  nav_bench.py --mode ackermann --out sonuc.json [--timeout 120]
+  nav_bench.py --mode diff --out sonuc.json [--timeout 120] [--hedefler tur.yaml]
 """
 
 import argparse
 import json
 import math
+import os
 import sys
 import time
 
@@ -36,11 +40,13 @@ from nav_msgs.msg import Odometry, Path
 from rcl_interfaces.msg import Log
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
+import tf2_ros
+import yaml
 
 # rcl_interfaces/Log sabitleri Humble'da bytes (b'('); m.level ise int
 _ERROR_LEVEL = Log.ERROR[0] if isinstance(Log.ERROR, bytes) else int(Log.ERROR)
 
-# Hedef turu (map/dünya koordinatı, derece). Dünya: 8x8 m kapalı alan,
+# Varsayılan hedef turu (map/dünya koordinatı, derece). Dünya: 8x8 m kapalı alan,
 # y=0.6'da x∈[-2,2] bölme duvarı, (2,-2) ve (-2,-1.5)'te sütunlar.
 TOUR = [
     ('duz_ileri', 2.5, 0.0, 0.0),
@@ -88,6 +94,57 @@ def poly_clearance(px, py, poly):
     return min(seg_dist(px, py, *poly[i], *poly[(i + 1) % n]) for i in range(n))
 
 
+def load_tour_yaml(path):
+    """YAML dosyasından başlangıç pozu ve hedef listesini yükler.
+
+    Desteklenen YAML yapıları:
+      1) {'baslangic': [x, y, yaw] veya {'x': .., 'y': .., 'yaw_derece': ..},
+          'hedefler': [{'ad': .., 'x': .., 'y': .., 'yaw_derece': ..}, ...]}
+      2) [{'ad': .., 'x': .., 'y': .., 'yaw_derece': ..}, ...]
+    """
+    with open(path, 'r', encoding='utf-8') as f:
+        data = yaml.safe_load(f)
+
+    baslangic = (0.0, 0.0, 0.0)
+    if isinstance(data, dict):
+        if 'baslangic' in data and data['baslangic'] is not None:
+            b = data['baslangic']
+            if isinstance(b, dict):
+                bx = float(b.get('x', 0.0))
+                by = float(b.get('y', 0.0))
+                byaw = float(b.get('yaw_derece', b.get('yaw_deg', b.get('yaw', 0.0))))
+                baslangic = (bx, by, byaw)
+            elif isinstance(b, (list, tuple)):
+                bx = float(b[0]) if len(b) > 0 else 0.0
+                by = float(b[1]) if len(b) > 1 else 0.0
+                byaw = float(b[2]) if len(b) > 2 else 0.0
+                baslangic = (bx, by, byaw)
+        raw_list = data.get('hedefler', data.get('goals', data.get('waypoints', [])))
+    elif isinstance(data, list):
+        raw_list = data
+    else:
+        raise ValueError(f'Geçersiz YAML verisi: {path}')
+
+    tour = []
+    for i, item in enumerate(raw_list):
+        if isinstance(item, dict):
+            name = str(item.get('ad', item.get('name', item.get('goal', f'hedef_{i}'))))
+            x = float(item['x'])
+            y = float(item['y'])
+            yaw = float(item.get('yaw_derece', item.get('yaw_deg', item.get('yaw', 0.0))))
+            tour.append((name, x, y, yaw))
+        elif isinstance(item, (list, tuple)):
+            name = str(item[0])
+            x = float(item[1])
+            y = float(item[2])
+            yaw = float(item[3]) if len(item) > 3 else 0.0
+            tour.append((name, x, y, yaw))
+        else:
+            raise ValueError(f'Geçersiz hedef tanımı: {item}')
+
+    return tour, baslangic
+
+
 class Monitor:
     def __init__(self, node, footprint):
         self.node = node
@@ -108,6 +165,12 @@ class Monitor:
         # Yalpalama ölçüsü: hareket hâlinde (vx > 0.05) yaw hızı karesi ve işaret değişimi (±0.05 histerezis)
         self.wz_sq, self.wz_n, self.wz_flips, self.wz_sign, self.move_len = 0.0, 0, 0, 0, 0.0
         self.last_cmd_wz = 0.0
+        self.last_amcl_pose = None
+
+        # TF dinleyicisi (map -> base_footprint / base_link dönüşümü için)
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self.node)
+
         # diff sim (27.10.2026'dan beri): /odom gerçek tabanın hatalı odom'unu taklit eder, gerçek konum /odom_gercek.
         # İkisi de gelirse /odom_gercek kullanılır (Ackermann'da yalnız /odom var ve o gerçek konumdur).
         node.create_subscription(Odometry, '/odom', lambda m: None if self._gercek_var else self._odom(m), 20)
@@ -170,16 +233,45 @@ class Monitor:
                               round(self.last_cmd_vx, 3), round(self.last_cmd_wz, 3)))
 
     def _amcl(self, m):
-        if self.pose is None:
-            return
         p = m.pose.pose
         ax, ay, ayaw = p.position.x, p.position.y, yaw_from_quat(p.orientation)
+        self.last_amcl_pose = (ax, ay, ayaw)
+        if self.pose is None:
+            return
         gx, gy, gyaw = self.pose
         dxy = math.hypot(ax - gx, ay - gy)
         dyaw = abs(math.degrees(wrap(ayaw - gyaw)))
         self.loc_err_max = max(self.loc_err_max, dxy)
         self.loc_yaw_err_max = max(self.loc_yaw_err_max, dyaw)
         self.loc_samples.append((round(self.now(), 2), round(dxy, 3), round(dyaw, 1)))
+
+    def get_map_base_tf(self):
+        """map -> base_footprint (veya base_link) TF dönüşümünü (x, y, yaw) döndürür."""
+        for target_frame in ('base_footprint', 'base_link'):
+            try:
+                t = self.tf_buffer.lookup_transform(
+                    'map',
+                    target_frame,
+                    rclpy.time.Time()
+                )
+                tr = t.transform.translation
+                rot = t.transform.rotation
+                return (tr.x, tr.y, yaw_from_quat(rot))
+            except Exception:
+                continue
+        if self.last_amcl_pose is not None:
+            return self.last_amcl_pose
+        return None
+
+    def get_lokalizasyon_hatasi(self):
+        """O anda map->base_footprint TF ile /odom_gercek arasındaki Öklid farkı (m)."""
+        if self.pose is None:
+            return None
+        gx, gy, _ = self.pose
+        tf_pose = self.get_map_base_tf()
+        if tf_pose is not None:
+            return round(math.hypot(tf_pose[0] - gx, tf_pose[1] - gy), 3)
+        return None
 
     def _plan(self, m):
         # cusp = yol boyunca ileri/geri yön değişimi (pozun yönelimine göre hareket yönü)
@@ -260,7 +352,19 @@ def main(argv=None):
     ap.add_argument('--out', required=True)
     ap.add_argument('--timeout', type=float, default=120.0, help='hedef başına sim saniyesi')
     ap.add_argument('--label', default='')
+    ap.add_argument('--hedefler', default=None, help='Hedef turu YAML dosyası yolu')
     a = ap.parse_args(argv)
+
+    tour = TOUR
+    baslangic = (0.0, 0.0, 0.0)
+    if a.hedefler:
+        if not os.path.exists(a.hedefler):
+            print(f'HATA: Hedef turu dosyası bulunamadı: {a.hedefler}', file=sys.stderr)
+            return 2
+        tour, baslangic = load_tour_yaml(a.hedefler)
+        if not tour:
+            print(f'HATA: Hedef listesi boş: {a.hedefler}', file=sys.stderr)
+            return 2
 
     rclpy.init()
     nav = BasicNavigator(node_name='nav_bench')
@@ -275,13 +379,14 @@ def main(argv=None):
         print('HATA: /odom gelmedi', file=sys.stderr)
         return 3
 
-    nav.setInitialPose(make_pose(nav, 0.0, 0.0, 0.0))
+    bx, by, byaw = baslangic
+    nav.setInitialPose(make_pose(nav, bx, by, byaw))
     nav.waitUntilNav2Active(localizer='amcl')
     spin_for(nav, 2.0)
 
     results = []
     wall0, sim0 = time.monotonic(), mon.now()
-    for name, gx, gy, gyaw in TOUR:
+    for name, gx, gy, gyaw in tour:
         mon.reset_goal()
         start_sim = mon.now()
         max_rec = 0
@@ -303,14 +408,28 @@ def main(argv=None):
                       TaskResult.FAILED: 'FAILED'}.get(r, str(r))
         spin_for(nav, 0.5)
         x, y, yaw = mon.pose
+
+        sure_s = round(mon.now() - start_sim, 2)
+        kurtarma_sayisi = int(max_rec)
+        pos_err = round(math.hypot(x - gx, y - gy), 3)
+        yaw_err = round(abs(math.degrees(wrap(yaw - math.radians(gyaw)))), 1)
+        min_aciklik = None if math.isinf(mon.min_clear) else round(mon.min_clear, 3)
+        lok_hatasi = mon.get_lokalizasyon_hatasi()
+
         res = {
             'goal': name, 'target': [gx, gy, gyaw], 'status': status,
-            'sim_time_s': round(mon.now() - start_sim, 2),
-            'recoveries': int(max_rec),
-            'pos_err_m': round(math.hypot(x - gx, y - gy), 3),
-            'yaw_err_deg': round(abs(math.degrees(wrap(yaw - math.radians(gyaw)))), 1),
+            'sim_time_s': sure_s,
+            'sure_s': sure_s,
+            'recoveries': kurtarma_sayisi,
+            'kurtarma_sayisi': kurtarma_sayisi,
+            'pos_err_m': pos_err,
+            'yaw_err_deg': yaw_err,
+            'varis_hatasi_gercek_m': pos_err,
+            'varis_yon_hatasi_gercek_deg': yaw_err,
+            'lokalizasyon_hatasi_m': lok_hatasi,
             'path_len_m': round(mon.path_len, 2),
-            'min_clear_m': None if math.isinf(mon.min_clear) else round(mon.min_clear, 3),
+            'min_clear_m': min_aciklik,
+            'min_aciklik_m': min_aciklik,
             'reverse_s': round(mon.reverse_s, 1),
             'planner_fail': mon.planner_fail,
             'ctrl_fail': mon.ctrl_fail,
@@ -333,19 +452,42 @@ def main(argv=None):
     wall = time.monotonic() - wall0
     sim = mon.now() - sim0
     ok = [r for r in results if r['status'] == 'SUCCEEDED']
+    basari_orani = round(len(ok) / len(results), 3) if results else 0.0
+    ok_varis = [r['varis_hatasi_gercek_m'] for r in ok if r.get('varis_hatasi_gercek_m') is not None]
+    ort_varis = round(sum(ok_varis) / len(ok_varis), 3) if ok_varis else None
+    maks_varis = round(max(ok_varis), 3) if ok_varis else None
+
+    lok_hatalari = [r['lokalizasyon_hatasi_m'] for r in results if r.get('lokalizasyon_hatasi_m') is not None]
+    ort_lok = round(sum(lok_hatalari) / len(lok_hatalari), 3) if lok_hatalari else None
+    toplam_sure = round(sum(r['sim_time_s'] for r in results), 1)
+
     summary = {
         'label': a.label, 'mode': a.mode,
         'succeeded': len(ok), 'total': len(results),
-        'total_sim_time_s': round(sum(r['sim_time_s'] for r in results), 1),
+        'total_sim_time_s': toplam_sure,
         'mean_pos_err_m': round(sum(r['pos_err_m'] for r in ok) / len(ok), 3) if ok else None,
         'total_recoveries': sum(r['recoveries'] for r in results),
         'total_planner_fail': sum(r['planner_fail'] for r in results),
         'min_clear_m': min((r['min_clear_m'] for r in results if r['min_clear_m'] is not None),
                            default=None),
         'real_time_factor': round(sim / wall, 2) if wall > 0 else None,
+        # Yeni özet ölçütleri (Türkçe ve eş anlamlılar)
+        'basari_orani': basari_orani,
+        'success_rate': basari_orani,
+        'ortalama_varis_hatasi_gercek_m': ort_varis,
+        'ort_varis_hatasi_gercek_m': ort_varis,
+        'maks_varis_hatasi_gercek_m': maks_varis,
+        'max_varis_hatasi_gercek_m': maks_varis,
+        'ortalama_lokalizasyon_hatasi_m': ort_lok,
+        'ort_lokalizasyon_hatasi_m': ort_lok,
+        'toplam_sure_s': toplam_sure,
     }
-    with open(a.out, 'w') as f:
-        json.dump({'summary': summary, 'goals': results}, f, indent=2, ensure_ascii=False)
+    out_data = {'summary': summary, 'goals': results}
+    with open(a.out, 'w', encoding='utf-8') as f:
+        if a.out.endswith(('.yaml', '.yml')):
+            yaml.dump(out_data, f, allow_unicode=True, sort_keys=False)
+        else:
+            json.dump(out_data, f, indent=2, ensure_ascii=False)
     print('OZET ' + json.dumps(summary, ensure_ascii=False), flush=True)
     nav.destroy_node()
     rclpy.shutdown()

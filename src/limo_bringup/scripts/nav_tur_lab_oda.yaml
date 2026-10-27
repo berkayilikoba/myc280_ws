@@ -1,0 +1,44 @@
+# Lab oda hedef turu (haritada ölçülen açıklıklar parantez içinde belirtilmiştir)
+# Dünya: lab_oda_3b.world / lab_oda.world, Harita: lab_oda.yaml
+# Başlangıç pozisyonu: (0, 0, 0°)
+baslangic:
+  x: 0.0
+  y: 0.0
+  yaw_derece: 0.0
+
+hedefler:
+  - ad: oda_orta
+    x: 3.0
+    y: 0.3
+    yaw_derece: 0.0
+    aciklik_m: 0.94  # [0.94 m]
+  - ad: dogu
+    x: 5.2
+    y: 0.9
+    yaw_derece: 90.0
+    aciklik_m: 0.56  # [0.56 m]
+  - ad: masa_onu
+    x: 2.0
+    y: 1.2
+    yaw_derece: 180.0
+    aciklik_m: 0.52  # [0.52 m]
+  - ad: kuzeydogu
+    x: 4.2
+    y: 2.3
+    yaw_derece: 0.0
+    aciklik_m: 0.34  # [0.34 m, dar]
+  - ad: bati_dar
+    x: -1.5
+    y: 1.0
+    yaw_derece: 90.0
+    aciklik_m: 0.27  # [0.27 m, çok dar — zor hedef]
+  - ad: orta
+    x: 1.0
+    y: 1.0
+    yaw_derece: -90.0
+    aciklik_m: 0.75  # [0.75 m]
+  - ad: ev
+    x: 0.0
+    y: 0.0
+    yaw_derece: 0.0
+    aciklik_m: 0.66  # [0.66 m]
