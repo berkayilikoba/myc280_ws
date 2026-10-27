@@ -1,0 +1,237 @@
+material Oda/duvar_0
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_0.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_1
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_1.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_2
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_2.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_3
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_3.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_4
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_4.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_5
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_5.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_6
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_6.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_7
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_7.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_8
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_8.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_9
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_9.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_10
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_10.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_11
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_11.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/duvar_12
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture duvar_12.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/zemin
+{
+  technique
+  {
+    pass
+    {
+      ambient 0.4 0.4 0.4 1.0
+      diffuse 1 1 1 1
+      texture_unit
+      {
+        texture zemin.png
+        filtering trilinear
+      }
+    }
+  }
+}

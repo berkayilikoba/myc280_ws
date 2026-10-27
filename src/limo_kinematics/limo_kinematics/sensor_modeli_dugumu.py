@@ -13,21 +13,36 @@ Değerler gerçek kayıtlardan (saha/analiz/sim_param_cikar.py -> saha/config/si
          σ(z) = a·z² (a = 0.00176 1/m, D435 848x480 sabit sahne ölçümü), geçerli aralık [z_min, z_max], derinlik
          süreksizliklerinde gölge şeridi (gerçek D435'te nesne kenarında geçersiz bant), zeminde yüksek kayıp
          (gerçekte %16-40 geçerli) ve leke halinde rastgele boşluk.
+  renk   /camera/color_sim/image_raw (rgb8 veya bgr8) -> /camera/color/image_raw + camera_info:
+         gerçek D435 renk bozulma modeli (hareket bulanıklığı, radyal vinyet, beyaz denge kazancı ve Poisson-Gauss gürültüsü).
 odom_hatasi:=false ile /odom = gerçek konum (eski davranış; Nav2 ayar düzeneği için).
-bolum: 'odom_imu' ya da 'derinlik' (iki ayrı süreç: 1.6 MB derinlik mesajını Python'da çözmek tek iş parçacıklı düğümde
-odom/IMU'yu 15 Hz'e düşürüyordu, 27.10.2026 ölçümü) ya da 'hepsi'.
+bolum: 'odom_imu', 'derinlik', 'renk' ya da 'hepsi'.
 """
 
+import array
 import math
 
+import cv2
 import numpy as np
 import rclpy
+import yaml
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, Imu, LaserScan
 from tf2_ros import TransformBroadcaster
+
+try:
+    from limo_kinematics import renk_bozu
+    from limo_kinematics.renk_bozu import renk_boz
+except ImportError:
+    import renk_bozu
+    from renk_bozu import renk_boz
+
+VARSAYILAN_RENK_PARAM = getattr(
+    renk_bozu, "VARSAYILAN_PARAM", getattr(renk_bozu, "VARSAYILAN_PARAMETRELER", {})
+)
 
 
 def yaw_q(q):
@@ -139,13 +154,45 @@ def imu_titresim_sigma(v, w):
     return g, a
 
 
+def renk_mesaj_boz(
+    veri: np.ndarray,
+    encoding: str,
+    param=None,
+    w_z: float = 0.0,
+    v_x: float = 0.0,
+    rng=None,
+) -> np.ndarray:
+    """ROS bağımsız renk bozulma yardımcı fonksiyonu (RGB/BGR bağımsız)."""
+    if not isinstance(veri, np.ndarray):
+        veri = np.asarray(veri)
+    if veri.size == 0:
+        return veri.astype(np.uint8, copy=True)
+    if veri.dtype != np.uint8:
+        veri = np.clip(np.round(veri), 0, 255).astype(np.uint8)
+    if not veri.flags['C_CONTIGUOUS']:
+        veri = np.ascontiguousarray(veri)
+
+    w_z_val = float(w_z) if w_z is not None else 0.0
+    v_x_val = float(v_x) if v_x is not None else 0.0
+
+    enc = str(encoding).strip().lower()
+    if enc in ('rgb8', 'rgb') and veri.ndim == 3 and veri.shape[2] == 3:
+        bgr = cv2.cvtColor(veri, cv2.COLOR_RGB2BGR)
+        bozuk_bgr = renk_boz(bgr, param=param, w_z=w_z_val, v_x=v_x_val, rng=rng)
+        return cv2.cvtColor(bozuk_bgr, cv2.COLOR_BGR2RGB)
+    else:
+        return renk_boz(veri, param=param, w_z=w_z_val, v_x=v_x_val, rng=rng)
+
+
 class SensorModeliDugumu(Node):
 
     def __init__(self):
         super().__init__('sensor_modeli')
         p = self.declare_parameter
         bolum = p('bolum', 'hepsi').value
-        oi, dr = bolum in ('hepsi', 'odom_imu'), bolum in ('hepsi', 'derinlik')
+        oi = bolum in ('hepsi', 'odom_imu')
+        dr = bolum in ('hepsi', 'derinlik')
+        rk = bolum in ('hepsi', 'renk')
         self.odom_hatasi = p('odom_hatasi', True).value
         self.oh = OdomHatasi(p('k_w', 0.9954).value, p('k_v', 1.0188).value, p('sigma_w', 0.006).value)
         self.nicem = p('jiroskop_nicem', 0.00349).value
@@ -157,6 +204,24 @@ class SensorModeliDugumu(Node):
                        z_max=p('derinlik_z_max', 10.0).value, golge_esik=p('derinlik_golge_esik', 0.08).value,
                        bosluk=p('derinlik_bosluk', 0.02).value)
         self.rng = np.random.default_rng(1)
+
+        self.renk_bozu_aktif = p('renk_bozu', True).value
+        self.renk_param_dosyasi = p('renk_param_dosyasi', '').value
+        self.renk_tohum = p('renk_tohum', 2).value
+        self.renk_rng = np.random.default_rng(self.renk_tohum)
+        self.renk_param = dict(VARSAYILAN_RENK_PARAM)
+        if self.renk_param_dosyasi:
+            try:
+                with open(self.renk_param_dosyasi, 'r', encoding='utf-8') as f:
+                    yuklenen = yaml.safe_load(f)
+                    if isinstance(yuklenen, dict):
+                        if 'renk' in yuklenen and isinstance(yuklenen['renk'], dict):
+                            self.renk_param.update(yuklenen['renk'])
+                        else:
+                            self.renk_param.update(yuklenen)
+            except Exception as e:
+                self.get_logger().error(f"Renk parametre dosyası okunamadı ({self.renk_param_dosyasi}): {e}")
+
         if oi:
             self.tf = TransformBroadcaster(self)
             self.p_odom = self.create_publisher(Odometry, 'odom', 20)
@@ -168,6 +233,9 @@ class SensorModeliDugumu(Node):
             self.get_logger().info(f'odom/IMU/lidar modeli: odom_hatasi={self.odom_hatasi} k_w={self.oh.k_w} '
                                    f'k_v={self.oh.k_v} σw={self.oh.sigma_w}; jiroskop nicem {self.nicem}; '
                                    f'IMU titreşim {self.titresim}, ivme ölçek {IVME_OLCEK}; lidar kayıp {self.lidar_kayip}')
+        elif rk:
+            self.create_subscription(Odometry, '/odom_gercek', self._odom_hiz, 50)
+
         if dr:
             self.p_d = self.create_publisher(Image, '/camera/depth/image_raw', qos_profile_sensor_data)
             self.p_di = self.create_publisher(CameraInfo, '/camera/depth/camera_info', qos_profile_sensor_data)
@@ -175,6 +243,15 @@ class SensorModeliDugumu(Node):
             self.create_subscription(CameraInfo, '/camera/depth_sim/depth/camera_info', self._dinfo,
                                      qos_profile_sensor_data)
             self.get_logger().info(f'derinlik modeli: {self.dp}')
+
+        if rk:
+            self.p_c = self.create_publisher(Image, '/camera/color/image_raw', qos_profile_sensor_data)
+            self.p_ci = self.create_publisher(CameraInfo, '/camera/color/camera_info', qos_profile_sensor_data)
+            self.create_subscription(Image, '/camera/color_sim/image_raw', self._renk, qos_profile_sensor_data)
+            self.create_subscription(CameraInfo, '/camera/color_sim/camera_info', self._cinfo,
+                                     qos_profile_sensor_data)
+            self.get_logger().info(f'renk modeli: renk_bozu={self.renk_bozu_aktif}, tohum={self.renk_tohum}, '
+                                   f'dosya={self.renk_param_dosyasi or "varsayilan"}, param={self.renk_param}')
 
     def _odom(self, m):
         self.hiz = (m.twist.twist.linear.x, m.twist.twist.angular.z)
@@ -223,12 +300,51 @@ class SensorModeliDugumu(Node):
         out = Image()
         out.header, out.height, out.width = m.header, m.height, m.width
         out.encoding, out.is_bigendian, out.step = '16UC1', 0, m.width * 2
-        out.data = derinlik_bozu(z, rng=self.rng, K=self.dK, **self.dp).tobytes()
+        # array.array: rclpy bytes atamasını bayt bayt doğruluyor (2.7 MB: 146 ms -> 2 ms)
+        out.data = array.array('B', derinlik_bozu(z, rng=self.rng, K=self.dK, **self.dp).tobytes())
         self.p_d.publish(out)
 
     def _dinfo(self, m):
         self.dK = np.array(m.k, np.float32)
         self.p_di.publish(m)
+
+    def _odom_hiz(self, m):
+        self.hiz = (m.twist.twist.linear.x, m.twist.twist.angular.z)
+
+    def _renk(self, m):
+        if not self.renk_bozu_aktif:
+            self.p_c.publish(m)
+            return
+
+        if m.encoding not in ('rgb8', 'bgr8'):
+            self.p_c.publish(m)
+            return
+
+        try:
+            if m.step == 0 or m.step == m.width * 3:
+                veri = np.frombuffer(m.data, dtype=np.uint8).reshape((m.height, m.width, 3))
+            else:
+                veri = np.frombuffer(m.data, dtype=np.uint8).reshape((m.height, m.step))[:, :m.width * 3].reshape((m.height, m.width, 3))
+        except Exception as e:
+            self.get_logger().warn(f"Renk görüntüsü çözümlenemedi: {e}")
+            self.p_c.publish(m)
+            return
+
+        v_x, w_z = self.hiz
+        bozuk = renk_mesaj_boz(veri, m.encoding, self.renk_param, w_z=w_z, v_x=v_x, rng=self.renk_rng)
+
+        out = Image()
+        out.header = m.header
+        out.height = m.height
+        out.width = m.width
+        out.encoding = m.encoding
+        out.is_bigendian = m.is_bigendian
+        out.step = m.width * 3
+        out.data = array.array('B', bozuk.tobytes())
+        self.p_c.publish(out)
+
+    def _cinfo(self, m):
+        self.p_ci.publish(m)
 
 
 def main(args=None):
