@@ -45,3 +45,44 @@ def test_derinlik_golge_seridi():
     z[:, 20:] = 3.0                                                  # sağ taraf uzak: kenarın uzak yanı gölgelenir
     d = derinlik_bozu(z, a=0, golge_esik=0.08, bosluk=0)
     assert (d[:, 20:23] == 0).all() and (d[:, :20] == 1000).all() and (d[:, 24:] == 3000).all()
+
+
+def test_zemin_cogu_gecersiz_duvar_gecerli():
+    from limo_kinematics.sensor_modeli_dugumu import gelis_acisi
+    H, W = 240, 320
+    K = np.array([200.0, 0, W / 2, 0, 200.0, H / 2, 0, 0, 1], np.float32)
+    v = (np.arange(H) - H / 2) / 200.0
+    z = np.full((H, W), 3.0, np.float32)                     # dik duvar 3 m
+    alt = v > 0.02                                           # alt yarı: 0.18 m yükseklikten görülen zemin
+    z[alt] = (0.18 / v[alt])[:, None].astype(np.float32)
+    z[z > 3.0] = 3.0
+    aci = gelis_acisi(z, K)
+    assert np.median(aci[:H // 2 - 5, 5:-5]) < 45                     # duvar: açı = ışının optik eksenden sapması
+    zemin = slice(H // 2 + 12, H // 2 + 36)                         # 1.4-4.5 m zemin (gerçek ölçüm aralığı)
+    assert np.median(aci[zemin, 5:-5]) > 70                           # zemin sıyırma
+    d = derinlik_bozu(z, a=0, golge_esik=0, bosluk=0.0, K=K, rng=np.random.default_rng(0))
+    assert (d[:H // 2 - 5, 5:-5] > 0).mean() > 0.95
+    assert 0.1 < (d[zemin, 5:-5] > 0).mean() < 0.35                   # gerçek D435 zemin: %16-25
+
+
+def test_imu_titresim_sigma():
+    from limo_kinematics.sensor_modeli_dugumu import imu_titresim_sigma
+    g, a = imu_titresim_sigma(0.0, 0.0)
+    assert np.allclose(g, 0) and np.allclose(a, 0)
+    g, a = imu_titresim_sigma(0.15, 0.0)
+    assert np.allclose(a, [0.23, 0.11, 0.11])
+    g, a = imu_titresim_sigma(0.0, -0.45)
+    assert np.allclose(g, [0.007, 0.006, 0.065])
+
+
+def test_siyirma_acisindaki_yan_duvar_gecerli_kalir():
+    """gerçekte sıyırma açısındaki yan duvar geçerli: kayıp açıdan değil zeminden"""
+    H, W = 120, 320
+    K = np.array([200.0, 0, W / 2, 0, 200.0, H / 2, 0, 0, 1], np.float32)
+    u = (np.arange(W) - W / 2) / 200.0
+    z = np.full((H, W), 6.0, np.float32)
+    sag = u > 0.05
+    z[:, sag] = (0.3 / u[sag])[None, :].astype(np.float32)   # x = 0.3 m'de yan duvar (sıyırma)
+    z = np.minimum(z, 6.0)
+    d = derinlik_bozu(z, a=0, golge_esik=0, bosluk=0.0, K=K, rng=np.random.default_rng(0))
+    assert (d[5:-5, W // 2 + 20:W - 5] > 0).mean() > 0.95

@@ -27,8 +27,10 @@ class KanalParam:
 # R² 0.98-0.99, eski değerlerle 0.85-0.88). Eski (0.30, 0.45, 0.15, 0.95) PC'de kaydedilmiş teleop verisindendi; 0.3 s
 # gecikmenin çoğu Wi-Fi'dı. w: yeni uydurma eskisinden iyi değil (doğrulama 0.946 / 0.943); yalnız kazanç, gerçek
 # kapsama turunun simde oynatılmasında toplam dönüş sim 1811° / gerçek 1792° çıktığı için 1.05 -> 1.039 (sim_real_fark).
+# w gecikme/τ/ivme: 4 kayıtla kayıt başına R² ortalaması (taban_uydur.py --birakmali) 0.0 s / 0.16 s / 12 rad/s²
+# -> ort 0.937, en kötü 0.871 (önceki 0.05 / 0.20 / 6: 0.925, 0.842). Kazanç uçtan uca oynatmayla ayarlı kalır.
 V_VARSAYILAN = KanalParam(0.05, 0.05, 3.0, 1.0, 1.0)
-W_VARSAYILAN = KanalParam(0.05, 0.20, 6.0, 1.039, 0.5)
+W_VARSAYILAN = KanalParam(0.0, 0.16, 12.0, 1.039, 0.5)
 
 
 class Kanal:

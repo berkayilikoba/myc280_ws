@@ -60,6 +60,9 @@ def main():
     ap.add_argument('--uydur', nargs='+', required=True)
     ap.add_argument('--dogrula', nargs='+', default=[])
     ap.add_argument('--k_v', type=float, default=1.0188)
+    ap.add_argument('--kanal', choices=['v', 'w', 'ikisi'], default='ikisi')
+    ap.add_argument('--birakmali', action='store_true',
+                    help='--uydur kayıtlarında birini dışarıda bırakarak çapraz doğrulama (ortalama R²); ince ızgara')
     a = ap.parse_args()
     U = [oku(b, a.k_v) for b in a.uydur]
     D = [oku(b, a.k_v) for b in a.dogrula]
@@ -67,7 +70,26 @@ def main():
                                                  ivme=[0.15, 0.3, 0.6, 1.0, 3.0], kazanc=[0.95, 1.0, 1.05], watchdog=[1.0])),
                            ('w', 2, 2, dict(gecikme=[0.0, 0.03, 0.05, 0.1, 0.2], tau=[0.05, 0.1, 0.2, 0.3],
                                             ivme=[1.0, 3.0, 6.0, 12.0], kazanc=[0.95, 1.0, 1.05], watchdog=[0.5]))):
+        if a.kanal != 'ikisi' and ad != a.kanal:
+            continue
         uv = [(C, R) for C, V, W in U for R in [V if ad == 'v' else W]]
+        if a.birakmali:
+            if ad == 'w':
+                izg = dict(gecikme=[0.0, 0.02, 0.04, 0.06, 0.08], tau=[0.05, 0.08, 0.12, 0.16, 0.2, 0.25],
+                           ivme=[0.8, 1.2, 2.0, 3.0, 6.0, 12.0], kazanc=[0.97, 1.0, 1.02, 1.04], watchdog=[0.5])
+            sonuc = []
+            for c in itertools.product(*izg.values()):
+                p = KanalParam(*c)
+                r = [skor(p, [uv[j]], i) for j in range(len(uv))]   # her kayıt ayrı R²
+                sonuc.append((float(np.mean(r)), float(np.min(r)), c))
+            sonuc.sort(reverse=True)
+            eski = KanalParam(0.30, 0.45, 0.15, 0.95, 1.0) if ad == 'v' else KanalParam(0.05, 0.20, 6.0, 1.039, 0.5)
+            re = [skor(eski, [uv[j]], i) for j in range(len(uv))]
+            print(f'{ad}: kayıt başına R² ortalaması en iyi 5:')
+            for m, mn, c in sonuc[:5]:
+                print(f'   {KanalParam(*c)}  ort {m:.3f} en kötü {mn:.3f}')
+            print(f'   mevcut {eski}: ort {np.mean(re):.3f} en kötü {np.min(re):.3f}')
+            continue
         dv = [(C, R) for C, V, W in D for R in [V if ad == 'v' else W]]
         en = max((skor(KanalParam(*c), uv, i), c) for c in itertools.product(*izg.values()))
         p = KanalParam(*en[1])
