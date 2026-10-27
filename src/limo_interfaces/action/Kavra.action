@@ -1,0 +1,19 @@
+# Hedef
+geometry_msgs/PointStamped nesne      # herhangi bir çerçeve (tipik map)
+float32 yon_derece                    # istenen yaklaşma yönü; NaN = serbest
+bool algisiz_izinli                   # algı yoksa haritadaki konumla son yaklaşma yapılabilir mi
+---
+# Sonuç
+bool basarili
+string neden                          # 'HAZIR' | 'HATA <ayrıntı>'
+geometry_msgs/PointStamped nesne_robotta   # base_footprint
+float32 tahmini_hata_cm
+float32 tahmini_yon_hatasi_derece
+float32 sure_s
+---
+# Geri bildirim
+string durum                          # PLAN | NAV_Q | SON_YAKLASMA | KURTARMA
+string ayrinti
+int32 aday_no
+int32 aday_sayisi
+float32 kalan_mesafe_m

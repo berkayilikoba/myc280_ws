@@ -6,10 +6,12 @@ Bu düğüm yalnızca ROS 2 arayüzleri ile durum makinesi arasında köprüdür
   - Durum makinesinden dönen eylemleri uygular.
 
 Arayüzler:
-  - Kavrama katmanı:
-      /kavrama/hedef (PointStamped, map)
-      /kavrama/durum (String, dinleme)
-      /kavrama/iptal (Empty)
+  - Kavrama katmanı (`kavrama_arayuzu` parametresi: 'auto' | 'eylem' | 'konu', vars. 'auto'):
+      Eylem: /kavra (limo_interfaces/action/Kavra istemcisi; 5 sn içinde yoksa 'auto' modda konuya düşer)
+      Konu (yedek/eski):
+        /kavrama/hedef (PointStamped, map)
+        /kavrama/durum (String, dinleme)
+        /kavrama/iptal (Empty)
   - Kol katmanı:
       /kol/kavra (Trigger istemcisi)
       /kol/birak (Trigger istemcisi)
@@ -45,6 +47,14 @@ from limo_autonomy.gorev_yoneticisi import (
     load_nesneler,
 )
 
+try:
+    from limo_interfaces.action import Kavra
+
+    LIMO_INTERFACES_VAR = True
+except ImportError:
+    Kavra = None
+    LIMO_INTERFACES_VAR = False
+
 
 def yaw_deg_to_quaternion(yaw_deg: float) -> Quaternion:
     """Derece cinsinden yaw açısını geometry_msgs Quaternion formatına dönüştürür."""
@@ -56,6 +66,52 @@ def yaw_deg_to_quaternion(yaw_deg: float) -> Quaternion:
     q.z = math.sin(half)
     q.w = math.cos(half)
     return q
+
+
+def kavrama_arayuzu_sec(
+    mod_param: str,
+    eylem_paketi_var: bool,
+    sunucu_hazir_mi: bool,
+) -> str:
+    """Kavrama çağrısı için kullanılacak arayüzü belirler (ROS'suz saf fonksiyon).
+
+    Parametreler:
+        mod_param: 'auto' | 'eylem' | 'konu'
+        eylem_paketi_var: limo_interfaces paketi ve istemcisi mevcut mu
+        sunucu_hazir_mi: /kavra eylem sunucusu zaman aşımı içinde yanıt verdi mi
+
+    Döndürür:
+        'eylem' | 'konu' | 'hata_eylem_yok'
+    """
+    mod = str(mod_param or 'auto').strip().lower()
+    if mod == 'konu':
+        return 'konu'
+    if mod == 'eylem':
+        if eylem_paketi_var and sunucu_hazir_mi:
+            return 'eylem'
+        return 'hata_eylem_yok'
+    # 'auto' (varsayılan)
+    if eylem_paketi_var and sunucu_hazir_mi:
+        return 'eylem'
+    return 'konu'
+
+
+def kavra_geri_bildirim_metni(fb: Any) -> str:
+    """Kavra eylem geri bildirimini /gorev/durum için okunabilir metne dönüştürür (saf fonksiyon)."""
+    durum = str(getattr(fb, 'durum', '')).strip()
+    ayrinti = str(getattr(fb, 'ayrinti', '')).strip()
+    aday_no = int(getattr(fb, 'aday_no', 0))
+    aday_sayisi = int(getattr(fb, 'aday_sayisi', 0))
+    kalan = float(getattr(fb, 'kalan_mesafe_m', float('nan')))
+
+    parcalar = [f'KAVRAMA {durum}' if durum else 'KAVRAMA']
+    if aday_sayisi > 0 and aday_no > 0:
+        parcalar.append(f'({aday_no}/{aday_sayisi})')
+    if math.isfinite(kalan) and kalan > 0.0:
+        parcalar.append(f'kalan={kalan:.2f}m')
+    if ayrinti:
+        parcalar.append(ayrinti)
+    return ' '.join(parcalar)
 
 
 class GorevDugumu(Node):
@@ -71,10 +127,16 @@ class GorevDugumu(Node):
         self.declare_parameter('kavrama_zaman_asimi', 240.0)
         self.declare_parameter('tasima_zaman_asimi', 180.0)
         self.declare_parameter('timer_periyot', 0.5)
+        self.declare_parameter('kavrama_arayuzu', 'auto')  # auto | eylem | konu
+        self.declare_parameter('kavrama_eylem_bekleme_s', 5.0)
+        self.declare_parameter('kavrama_yon_derece', float('nan'))
+        self.declare_parameter('kavrama_algisiz_izinli', True)
 
         self._cb_group = ReentrantCallbackGroup()
         self._kilit = threading.RLock()
         self._aktif_nav_gh: Optional[Any] = None
+        self._aktif_kavra_gh: Optional[Any] = None
+        self._aktif_kavrama_modu: str = 'konu'
 
         # Durum makinesini hazırla
         dosya_yolu = str(self.get_parameter('nesneler_dosyasi').value)
@@ -150,6 +212,20 @@ class GorevDugumu(Node):
             callback_group=self._cb_group,
         )
 
+        # Eylem İstemcisi (Kavra)
+        if LIMO_INTERFACES_VAR and Kavra is not None:
+            self.kavra_client: Optional[ActionClient] = ActionClient(
+                self,
+                Kavra,
+                'kavra',
+                callback_group=self._cb_group,
+            )
+        else:
+            self.kavra_client = None
+            self.get_logger().warn(
+                "limo_interfaces paketi bulunamadı; kavrama için konu arayüzü (/kavrama/hedef) kullanılacak."
+            )
+
         # Eylem İstemcisi (Nav2)
         self.nav_client = ActionClient(
             self,
@@ -182,7 +258,9 @@ class GorevDugumu(Node):
         self._eylemleri_uygula(eylemler)
 
     def _kavrama_durum_cb(self, msg: String) -> None:
-        """Kavrama katmanından gelen durum bildirimlerini işler."""
+        """Kavrama katmanından gelen konu tabanlı durum bildirimlerini işler."""
+        if self._aktif_kavrama_modu == 'eylem':
+            return
         durum_str = msg.data.strip()
         t = self._simdi()
         with self._kilit:
@@ -205,21 +283,10 @@ class GorevDugumu(Node):
                 self.get_logger().info(f"[DURUM] {eylem.veri}")
 
             elif eylem.tur == 'kavrama_hedef':
-                pos = eylem.veri
-                msg = PointStamped()
-                msg.header.frame_id = 'map'
-                msg.header.stamp = self.get_clock().now().to_msg()
-                msg.point.x = float(pos.x)
-                msg.point.y = float(pos.y)
-                msg.point.z = float(getattr(pos, 'z', 0.0))
-                self.pub_kavrama_hedef.publish(msg)
-                self.get_logger().info(
-                    f"Kavrama hedefi gönderildi: ({msg.point.x:.2f}, {msg.point.y:.2f}, {msg.point.z:.2f})"
-                )
+                self._kavrama_hedef_calistir(eylem.veri)
 
             elif eylem.tur == 'kavrama_iptal':
-                self.pub_kavrama_iptal.publish(Empty())
-                self.get_logger().info("Kavrama iptal mesajı gönderildi.")
+                self._kavrama_iptal_calistir()
 
             elif eylem.tur in ('kol_kavra', 'kol_birak'):
                 self._kol_eylemi_calistir(eylem.tur)
@@ -229,6 +296,135 @@ class GorevDugumu(Node):
 
             elif eylem.tur == 'nav_iptal':
                 self._nav_iptal_calistir()
+
+    def _kavrama_hedef_calistir(self, pos: Any) -> None:
+        """Kavrama hedefini kavra eylem istemcisiyle veya yedek konu arayüzüyle gönderir."""
+        mod_param = str(self.get_parameter('kavrama_arayuzu').value).strip().lower()
+        bekleme_s = float(self.get_parameter('kavrama_eylem_bekleme_s').value)
+
+        eylem_paketi_var = bool(LIMO_INTERFACES_VAR and self.kavra_client is not None and Kavra is not None)
+        sunucu_hazir = False
+        if mod_param != 'konu' and eylem_paketi_var and self.kavra_client is not None:
+            sunucu_hazir = bool(self.kavra_client.wait_for_server(timeout_sec=bekleme_s))
+
+        secilen = kavrama_arayuzu_sec(mod_param, eylem_paketi_var, sunucu_hazir)
+
+        if secilen == 'eylem' and self.kavra_client is not None and Kavra is not None:
+            self._aktif_kavrama_modu = 'eylem'
+            goal = Kavra.Goal()
+            goal.nesne = PointStamped()
+            goal.nesne.header.frame_id = 'map'
+            goal.nesne.header.stamp = self.get_clock().now().to_msg()
+            goal.nesne.point.x = float(pos.x)
+            goal.nesne.point.y = float(pos.y)
+            goal.nesne.point.z = float(getattr(pos, 'z', 0.0))
+            goal.yon_derece = float(getattr(pos, 'yon_derece', self.get_parameter('kavrama_yon_derece').value))
+            goal.algisiz_izinli = bool(
+                getattr(pos, 'algisiz_izinli', self.get_parameter('kavrama_algisiz_izinli').value)
+            )
+
+            self.get_logger().info(
+                f"Kavra eylem hedefi gönderiliyor: "
+                f"({goal.nesne.point.x:.2f}, {goal.nesne.point.y:.2f}, {goal.nesne.point.z:.2f})"
+            )
+            send_fut = self.kavra_client.send_goal_async(
+                goal,
+                feedback_callback=self._kavra_feedback_cb,
+            )
+            send_fut.add_done_callback(self._kavra_goal_response_cb)
+            return
+
+        if secilen == 'hata_eylem_yok':
+            self.get_logger().error(
+                f"kavra eylem sunucusu {bekleme_s:.1f} sn içinde bulunamadı (kavrama_arayuzu='eylem')."
+            )
+            with self._kilit:
+                eylemler = self.yonetici.olay('kavrama_durum', 'HATA kavra eylem sunucusu yok', self._simdi())
+            self._eylemleri_uygula(eylemler)
+            return
+
+        # 'konu' modu veya 'auto' modunda 5 sn içinde eylem sunucusu bulunamadığında konu arayüzüne düşüş
+        if mod_param != 'konu':
+            self.get_logger().warn(
+                f"kavra eylem sunucusu {bekleme_s:.1f} sn içinde bulunamadı; "
+                "eski konu arayüzüne (/kavrama/hedef) düşülüyor."
+            )
+        self._aktif_kavrama_modu = 'konu'
+        msg = PointStamped()
+        msg.header.frame_id = 'map'
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.point.x = float(pos.x)
+        msg.point.y = float(pos.y)
+        msg.point.z = float(getattr(pos, 'z', 0.0))
+        self.pub_kavrama_hedef.publish(msg)
+        self.get_logger().info(
+            f"Kavrama hedefi (konu) gönderildi: ({msg.point.x:.2f}, {msg.point.y:.2f}, {msg.point.z:.2f})"
+        )
+
+    def _kavra_feedback_cb(self, feedback_msg: Any) -> None:
+        """Kavra eylem sunucusundan gelen geri bildirimi /gorev/durum konusuna aktarır."""
+        fb = feedback_msg.feedback if hasattr(feedback_msg, 'feedback') else feedback_msg
+        metin = kavra_geri_bildirim_metni(fb)
+        self.pub_gorev_durum.publish(String(data=metin))
+        self.get_logger().info(f"[KAVRAMA GERİ BİLDİRİM] {metin}")
+
+        ara_durum = f"{getattr(fb, 'durum', '')} {getattr(fb, 'ayrinti', '')}".strip()
+        if ara_durum:
+            with self._kilit:
+                eylemler = self.yonetici.olay('kavrama_durum', ara_durum, self._simdi())
+            self._eylemleri_uygula(eylemler)
+
+    def _kavra_goal_response_cb(self, fut: Any) -> None:
+        """Kavra eylem hedefi kabul/red yanıtını işler."""
+        gh = fut.result()
+        if not gh.accepted:
+            self.get_logger().warn("Kavra eylem hedefi reddedildi.")
+            self._aktif_kavra_gh = None
+            with self._kilit:
+                eylemler = self.yonetici.olay('kavrama_durum', 'HATA kavra hedefi reddedildi', self._simdi())
+            self._eylemleri_uygula(eylemler)
+            return
+
+        self._aktif_kavra_gh = gh
+        res_fut = gh.get_result_async()
+        res_fut.add_done_callback(self._kavra_result_cb)
+
+    def _kavra_result_cb(self, fut: Any) -> None:
+        """Kavra eylem sonucunu işler ve durum makinesine iletir."""
+        self._aktif_kavra_gh = None
+        res_wrap = fut.result()
+        status = getattr(res_wrap, 'status', 0)
+        sonuc = getattr(res_wrap, 'result', None)
+
+        if sonuc is not None and bool(getattr(sonuc, 'basarili', False)):
+            neden = str(getattr(sonuc, 'neden', 'HAZIR')).strip()
+            durum_str = neden if neden.startswith('HAZIR') else f'HAZIR {neden}'
+        else:
+            neden = str(getattr(sonuc, 'neden', '')).strip() if sonuc is not None else ''
+            if neden.startswith('HATA'):
+                durum_str = neden
+            elif neden:
+                durum_str = f'HATA {neden}'
+            else:
+                durum_str = f'HATA kavra eylem basarisiz (status={status})'
+
+        self.get_logger().info(f"Kavra eylem sonucu alındı: status={status}, durum='{durum_str}'")
+        with self._kilit:
+            eylemler = self.yonetici.olay('kavrama_durum', durum_str, self._simdi())
+        self._eylemleri_uygula(eylemler)
+
+    def _kavrama_iptal_calistir(self) -> None:
+        """Aktif kavrama görevini (eylem veya konu) iptal eder."""
+        if self._aktif_kavra_gh is not None:
+            self.get_logger().info("Aktif kavra eylem görevi iptal ediliyor...")
+            try:
+                self._aktif_kavra_gh.cancel_goal_async()
+            except Exception as e:
+                self.get_logger().warn(f"Kavra eylem iptali sırasında hata: {e}")
+            self._aktif_kavra_gh = None
+        else:
+            self.pub_kavrama_iptal.publish(Empty())
+            self.get_logger().info("Kavrama iptal mesajı gönderildi.")
 
     def _kol_eylemi_calistir(self, tur: str) -> None:
         """Kol kavrama veya bırakma servisini asenkron iş parçacığında çalıştırır."""

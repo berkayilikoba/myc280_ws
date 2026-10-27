@@ -20,20 +20,27 @@ Konular:
     /kavrama/nesne_robotta    geometry_msgs/PointStamped  (frame base_footprint) — kola bildirilen nokta
     /kavrama/plan             geometry_msgs/PoseArray     ([Q, P] görselleştirme)
     /cmd_vel                  geometry_msgs/Twist         (parametre cmd_konu)
+
+Eylem Sunucusu:
+  /kavra                      limo_interfaces/action/Kavra
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import math
 import os
+import re
+import threading
 import time
+from typing import Any
 
 import numpy as np
 import rclpy
 from geometry_msgs.msg import PointStamped, Pose, PoseArray, PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import Odometry
-from rclpy.action import ActionClient
+from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -49,6 +56,14 @@ from limo_autonomy.son_yaklasma import (
     hedef_pozu,
     nesne_robotta_son,
 )
+
+try:
+    from limo_interfaces.action import Kavra
+
+    LIMO_INTERFACES_VAR = True
+except ImportError:
+    Kavra = None
+    LIMO_INTERFACES_VAR = False
 
 
 def yaw_q(q) -> float:
@@ -247,8 +262,358 @@ def kurtarma_durum_gecisi(
     return 'GECIS', kurtarma_sayisi + 1, aktif_aday_idx + 1, True
 
 
+# ---------------------------------------------------------------------------
+# Eylem (Action) İçin ROS'suz Saf Yardımcı Fonksiyonlar ve Sınıflar
+# ---------------------------------------------------------------------------
+
+
+def yon_derece_radyana(yon_derece: float | int | None) -> float | None:
+    """Derece cinsinden yaklaşma yönünü radyana çevirir; NaN veya None ise None döner."""
+    if yon_derece is None:
+        return None
+    val = float(yon_derece)
+    if not math.isfinite(val):
+        return None
+    return math.radians(val)
+
+
+def eylem_hedef_coz(
+    hedef: Any = None,
+    *,
+    yon_derece: float | None = float('nan'),
+    algisiz_izinli: bool = True,
+    ayar: Ayar | None = None,
+) -> dict[str, Any]:
+    """Kavra eylem hedefini (veya sözlük/tuple'ı) düğüm içi parametrelere dönüştürür (ROS'suz saf fonksiyon).
+
+    Parametreler:
+        hedef: Kavra.Goal benzeri nesne (.nesne, .yon_derece, .algisiz_izinli),
+               PointStamped benzeri nesne (.point, .header), sözlük veya (x, y[, z]) dizisi.
+        yon_derece: hedef içinde yon_derece alanı yoksa kullanılacak derece açısı (NaN -> serbest/None).
+        algisiz_izinli: hedef içinde algisiz_izinli alanı yoksa kullanılacak değer.
+        ayar: Verilirse ayar.yon alanı hesaplanan radyan değeri (veya None) ile güncellenir.
+
+    Döndürür:
+        {
+            'nesne_xyz': (x, y, z),
+            'frame_id': str,
+            'yon_rad': float | None,
+            'yon': float | None,
+            'algisiz_izinli': bool,
+            'ayar': Ayar | None,
+        }
+    """
+    nx, ny, nz = 0.0, 0.0, 0.0
+    frame_id = 'map'
+    hedef_yon = yon_derece
+    hedef_algisiz = algisiz_izinli
+
+    if hedef is not None:
+        if hasattr(hedef, 'nesne'):
+            nesne = hedef.nesne
+            if hasattr(nesne, 'point'):
+                nx = float(nesne.point.x)
+                ny = float(nesne.point.y)
+                nz = float(getattr(nesne.point, 'z', 0.0))
+            elif isinstance(nesne, (tuple, list)):
+                nx = float(nesne[0])
+                ny = float(nesne[1])
+                nz = float(nesne[2]) if len(nesne) > 2 else 0.0
+            header = getattr(nesne, 'header', None)
+            if header is not None and getattr(header, 'frame_id', ''):
+                frame_id = str(header.frame_id)
+            if hasattr(hedef, 'yon_derece'):
+                hedef_yon = getattr(hedef, 'yon_derece')
+            if hasattr(hedef, 'algisiz_izinli'):
+                hedef_algisiz = getattr(hedef, 'algisiz_izinli')
+        elif hasattr(hedef, 'point'):
+            nx = float(hedef.point.x)
+            ny = float(hedef.point.y)
+            nz = float(getattr(hedef.point, 'z', 0.0))
+            header = getattr(hedef, 'header', None)
+            if header is not None and getattr(header, 'frame_id', ''):
+                frame_id = str(header.frame_id)
+        elif isinstance(hedef, dict):
+            if 'nesne' in hedef:
+                n = hedef['nesne']
+                if isinstance(n, dict):
+                    pt = n.get('point', n)
+                    nx = float(pt.get('x', 0.0))
+                    ny = float(pt.get('y', 0.0))
+                    nz = float(pt.get('z', 0.0))
+                    hdr = n.get('header', {})
+                    if isinstance(hdr, dict) and hdr.get('frame_id'):
+                        frame_id = str(hdr['frame_id'])
+                elif isinstance(n, (tuple, list)):
+                    nx = float(n[0])
+                    ny = float(n[1])
+                    nz = float(n[2]) if len(n) > 2 else 0.0
+                elif hasattr(n, 'point'):
+                    nx = float(n.point.x)
+                    ny = float(n.point.y)
+                    nz = float(getattr(n.point, 'z', 0.0))
+                    header = getattr(n, 'header', None)
+                    if header is not None and getattr(header, 'frame_id', ''):
+                        frame_id = str(header.frame_id)
+            else:
+                nx = float(hedef.get('x', 0.0))
+                ny = float(hedef.get('y', 0.0))
+                nz = float(hedef.get('z', 0.0))
+                if hedef.get('frame_id'):
+                    frame_id = str(hedef['frame_id'])
+            if 'yon_derece' in hedef:
+                hedef_yon = hedef['yon_derece']
+            if 'algisiz_izinli' in hedef:
+                hedef_algisiz = hedef['algisiz_izinli']
+        elif isinstance(hedef, (tuple, list)):
+            nx = float(hedef[0])
+            ny = float(hedef[1])
+            nz = float(hedef[2]) if len(hedef) > 2 else 0.0
+
+    yon_rad = yon_derece_radyana(hedef_yon)
+    algisiz_bool = bool(hedef_algisiz)
+
+    if ayar is not None:
+        ayar.yon = yon_rad
+
+    return {
+        'nesne_xyz': (nx, ny, nz),
+        'frame_id': frame_id,
+        'yon_rad': yon_rad,
+        'yon': yon_rad,
+        'algisiz_izinli': algisiz_bool,
+        'ayar': ayar,
+    }
+
+
+def durum_metni_ayristir(metin: str) -> tuple[str, str]:
+    """'DURUM ayrıntı' biçimindeki durum metnini (durum, ayrinti) olarak ikiye ayırır."""
+    s = str(metin or '').strip()
+    if not s:
+        return ('', '')
+    parcalar = s.split(None, 1)
+    durum = parcalar[0]
+    ayrinti = parcalar[1].strip() if len(parcalar) > 1 else ''
+    return (durum, ayrinti)
+
+
+def durum_metninden_sonuc(durum_metni: str) -> tuple[bool, str]:
+    """Durum metninden ('HAZIR ...' veya 'HATA ...') eylem sonucu (basarili, neden) üretir."""
+    s = str(durum_metni or '').strip()
+    if s.startswith('HAZIR'):
+        return (True, 'HAZIR')
+    if s.startswith('HATA'):
+        return (False, s)
+    if s:
+        return (False, f'HATA {s}')
+    return (False, 'HATA bilinmeyen neden')
+
+
+@dataclass
+class KavraSonucBilgi:
+    """ROS'suz ortamlarda Kavra.Result alanlarını taşıyan saf veri yapısı."""
+
+    basarili: bool = False
+    neden: str = 'HATA'
+    nesne_robotta_xyz: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    tahmini_hata_cm: float = 0.0
+    tahmini_yon_hatasi_derece: float = 0.0
+    sure_s: float = 0.0
+    nesne_robotta: Any = None
+
+    def __getitem__(self, anahtar: Any) -> Any:
+        if anahtar == 0 or anahtar == 'basarili':
+            return self.basarili
+        if anahtar == 1 or anahtar == 'neden':
+            return self.neden
+        if anahtar in ('nesne_robotta_xyz', 'nesne_robotta', 'tahmini_hata_cm', 'tahmini_yon_hatasi_derece', 'sure_s'):
+            return getattr(self, anahtar)
+        raise KeyError(anahtar)
+
+
+_RE_NESNE_ROBOTTA = re.compile(
+    r'nesne\s+robotta\s*\(\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*\)'
+)
+_RE_P_HATASI = re.compile(
+    r'P\s+hatas[ıi]\s*([+-]?\d+(?:\.\d+)?)\s*cm\s*,\s*([+-]?\d+(?:\.\d+)?)\s*°'
+)
+_RE_SURE = re.compile(r'sure\s+([+-]?\d+(?:\.\d+)?)\s*s')
+
+
+def sonuc_doldur(
+    durum_metni: str,
+    sonuc_nesnesi: Any = None,
+    *,
+    nesne_robotta_xyz: tuple[float, float, float] | None = None,
+    tahmini_hata_cm: float | None = None,
+    tahmini_yon_hatasi_derece: float | None = None,
+    sure_s: float | None = None,
+    frame_id: str = 'base_footprint',
+) -> Any:
+    """HAZIR veya HATA durum metninden eylem sonuç nesnesini doldurur (ROS'suz saf fonksiyon).
+
+    Eğer metin 'HAZIR nesne robotta (...); P hatası X cm, Y°; sure Z s' biçimindeyse ve
+    ilgili sayısal argümanlar None bırakılmışsa metinden otomatik ayrıştırılır.
+    """
+    basarili, neden = durum_metninden_sonuc(durum_metni)
+    s = str(durum_metni or '')
+
+    if nesne_robotta_xyz is None:
+        m_nesne = _RE_NESNE_ROBOTTA.search(s)
+        if m_nesne:
+            nesne_robotta_xyz = (
+                float(m_nesne.group(1)),
+                float(m_nesne.group(2)),
+                float(m_nesne.group(3)),
+            )
+        else:
+            nesne_robotta_xyz = (0.0, 0.0, 0.0)
+    else:
+        nesne_robotta_xyz = (
+            float(nesne_robotta_xyz[0]),
+            float(nesne_robotta_xyz[1]),
+            float(nesne_robotta_xyz[2]) if len(nesne_robotta_xyz) > 2 else 0.0,
+        )
+
+    if tahmini_hata_cm is None or tahmini_yon_hatasi_derece is None:
+        m_hata = _RE_P_HATASI.search(s)
+        if m_hata:
+            if tahmini_hata_cm is None:
+                tahmini_hata_cm = float(m_hata.group(1))
+            if tahmini_yon_hatasi_derece is None:
+                tahmini_yon_hatasi_derece = float(m_hata.group(2))
+
+    if sure_s is None:
+        m_sure = _RE_SURE.search(s)
+        if m_sure:
+            sure_s = float(m_sure.group(1))
+
+    hata_cm_val = float(tahmini_hata_cm) if tahmini_hata_cm is not None else 0.0
+    yon_hata_val = float(tahmini_yon_hatasi_derece) if tahmini_yon_hatasi_derece is not None else 0.0
+    sure_val = float(sure_s) if sure_s is not None else 0.0
+
+    ps = PointStamped()
+    ps.header.frame_id = str(frame_id)
+    ps.point.x = float(nesne_robotta_xyz[0])
+    ps.point.y = float(nesne_robotta_xyz[1])
+    ps.point.z = float(nesne_robotta_xyz[2])
+
+    if sonuc_nesnesi is None:
+        return KavraSonucBilgi(
+            basarili=basarili,
+            neden=neden,
+            nesne_robotta_xyz=nesne_robotta_xyz,
+            tahmini_hata_cm=hata_cm_val,
+            tahmini_yon_hatasi_derece=yon_hata_val,
+            sure_s=sure_val,
+            nesne_robotta=ps,
+        )
+
+    sonuc_nesnesi.basarili = bool(basarili)
+    sonuc_nesnesi.neden = str(neden)
+    sonuc_nesnesi.tahmini_hata_cm = float(hata_cm_val)
+    sonuc_nesnesi.tahmini_yon_hatasi_derece = float(yon_hata_val)
+    sonuc_nesnesi.sure_s = float(sure_val)
+    if hasattr(sonuc_nesnesi, 'nesne_robotta'):
+        if getattr(sonuc_nesnesi, 'nesne_robotta') is None:
+            sonuc_nesnesi.nesne_robotta = ps
+        else:
+            sonuc_nesnesi.nesne_robotta.header.frame_id = str(frame_id)
+            sonuc_nesnesi.nesne_robotta.point.x = float(nesne_robotta_xyz[0])
+            sonuc_nesnesi.nesne_robotta.point.y = float(nesne_robotta_xyz[1])
+            sonuc_nesnesi.nesne_robotta.point.z = float(nesne_robotta_xyz[2])
+    return sonuc_nesnesi
+
+
+def geri_bildirim_gonderilmeli_mi(
+    simdi_s: float,
+    son_gonderim_s: float | None,
+    yeni_durum: str | None = None,
+    onceki_durum: str | None = None,
+    frekans_hz: float = 5.0,
+) -> bool:
+    """Geri bildirimin bu adımda yayınlanıp yayınlanmayacağını belirler (ROS'suz saf fonksiyon).
+
+    Durum değişimlerinde anında True döner; aynı durumda ise en az (1 / frekans_hz) saniye
+    geçtiğinde True döner.
+    """
+    if frekans_hz <= 0:
+        raise ValueError('frekans_hz pozitif olmalıdır')
+    if yeni_durum is not None and onceki_durum is not None and yeni_durum != onceki_durum:
+        return True
+    if son_gonderim_s is None:
+        return True
+    periyot = 1.0 / float(frekans_hz)
+    return (float(simdi_s) - float(son_gonderim_s)) >= (periyot - 1e-9)
+
+
+class GeriBildirimKisitlayici:
+    """Durum değişimlerinde anında, aynı durumda ise belirli frekansta (vars. 5 Hz) izin veren kısıtlayıcı."""
+
+    def __init__(self, frekans_hz: float = 5.0) -> None:
+        if frekans_hz <= 0:
+            raise ValueError('frekans_hz pozitif olmalıdır')
+        self.frekans_hz: float = float(frekans_hz)
+        self.periyot_s: float = 1.0 / self.frekans_hz
+        self.son_zaman_s: float | None = None
+        self.son_durum: str | None = None
+
+    def sifirla(self) -> None:
+        """Kısıtlayıcı zaman ve durum geçmişini sıfırlar."""
+        self.son_zaman_s = None
+        self.son_durum = None
+
+    def izin_var_mi(self, t_s: float, durum: str | None = None) -> bool:
+        """Verilen zaman (s) ve durumda geri bildirim gönderimine izin verilip verilmediğini döndürür."""
+        gonder = geri_bildirim_gonderilmeli_mi(
+            simdi_s=float(t_s),
+            son_gonderim_s=self.son_zaman_s,
+            yeni_durum=durum,
+            onceki_durum=self.son_durum,
+            frekans_hz=self.frekans_hz,
+        )
+        if gonder:
+            self.son_zaman_s = float(t_s)
+            if durum is not None:
+                self.son_durum = str(durum)
+            return True
+        return False
+
+
+@dataclass
+class KavraGeriBildirimBilgi:
+    """ROS'suz ortamlarda Kavra.Feedback alanlarını taşıyan saf veri yapısı."""
+
+    durum: str = ''
+    ayrinti: str = ''
+    aday_no: int = 0
+    aday_sayisi: int = 0
+    kalan_mesafe_m: float = 0.0
+
+
+def geri_bildirim_doldur(
+    geri_bildirim_nesnesi: Any = None,
+    *,
+    durum: str = '',
+    ayrinti: str = '',
+    aday_no: int = 0,
+    aday_sayisi: int = 0,
+    kalan_mesafe_m: float = 0.0,
+) -> Any:
+    """Geri bildirim mesaj nesnesini (veya KavraGeriBildirimBilgi'yi) doldurur."""
+    hedef = geri_bildirim_nesnesi if geri_bildirim_nesnesi is not None else KavraGeriBildirimBilgi()
+    hedef.durum = str(durum)
+    hedef.ayrinti = str(ayrinti)
+    hedef.aday_no = int(aday_no)
+    hedef.aday_sayisi = int(aday_sayisi)
+    hedef.kalan_mesafe_m = float(kalan_mesafe_m)
+    return hedef
+
+
 class KavramaDugumu(Node):
     """ICP'siz, nesneye göreli son yaklaşmalı ve kurtarmalı kavrama durum makinesi."""
+
+    AKTIF_DURUMLAR = ('PLAN', 'NAV_Q', 'SON_YAKLASMA', 'KURTARMA', 'GECIS')
 
     def __init__(self) -> None:
         super().__init__('kavrama')
@@ -266,13 +631,16 @@ class KavramaDugumu(Node):
         d_kavrama_val = p('d_kavrama', 0.22).value
         yanal_val = p('yanal', 0.0).value
 
+        varsayilan_yon_rad = yon_derece_radyana(yon)
+        self._varsayilan_yon_rad: float | None = varsayilan_yon_rad
+
         self.ayar = Ayar(
             d_kavrama=d_kavrama_val,
             yanal=yanal_val,
             d_on=d_on_val,
             pay=p('pay', 0.05).value,
             r_nesne=p('r_nesne', 0.12).value,
-            yon=None if math.isnan(yon) else math.radians(yon),
+            yon=varsayilan_yon_rad,
         )
 
         self.son_ayar = SonYaklasmaAyar(
@@ -351,9 +719,41 @@ class KavramaDugumu(Node):
 
         self.son_denetleyici: SonYaklasma | None = None
         self.algisiz: bool = False
+        self.algisiz_izinli: bool = True
         self.tek_olcum_verildi: bool = False
         self.t_son_yaklasma_baslangic: rclpy.time.Time | None = None
         self.son_durum_log_zamani: float = 0.0
+
+        # Eylem Sunucusu Durum ve Eşzamanlılık Değişkenleri
+        self._eylem_kilit = threading.RLock()
+        self._eylem_aktif: bool = False
+        self._aktif_eylem_gh: Any = None
+        self._eylem_bitti_event = threading.Event()
+        self._fb_kisitlayici = GeriBildirimKisitlayici(frekans_hz=5.0)
+        self._son_durum_metni: str = ''
+        self._son_nesne_robotta_xyz: tuple[float, float, float] = (0.0, 0.0, 0.0)
+        self._son_nesne_robotta_msg: PointStamped | None = None
+        self._son_hata_cm: float = 0.0
+        self._son_yon_hatasi_deg: float = 0.0
+        self._son_sure_s: float = 0.0
+        self._t_hedef_baslangic_s: float = 0.0
+
+        if LIMO_INTERFACES_VAR and Kavra is not None:
+            self._eylem_sunucu = ActionServer(
+                self,
+                Kavra,
+                'kavra',
+                execute_callback=self._kavra_execute_cb,
+                goal_callback=self._kavra_goal_cb,
+                cancel_callback=self._kavra_cancel_cb,
+                callback_group=self.cb,
+            )
+        else:
+            self._eylem_sunucu = None
+            self.get_logger().warn(
+                'limo_interfaces paketi bulunamadı (derlenmemiş olabilir); '
+                'kavra eylem sunucusu atlandı, yalnız konu arayüzü çalışıyor.'
+            )
 
         # 50 Hz Denetim Döngüsü Timer'ı
         self.timer_50hz = self.create_timer(1.0 / 50.0, self._dongu_50hz, callback_group=self.cb)
@@ -369,10 +769,76 @@ class KavramaDugumu(Node):
     def durum_adi(self, val: str) -> None:
         self.durum_kodu = val
 
+    def _simdi_s(self) -> float:
+        """ROS saatinden saniye cinsinden zaman döndürür."""
+        return float(self.get_clock().now().nanoseconds) / 1e9
+
+    def _mesgul_mu(self) -> bool:
+        """Düğümün aktif bir kavrama görevi yürütüp yürütmediğini döndürür."""
+        return (self.durum_kodu in self.AKTIF_DURUMLAR) or self._eylem_aktif
+
     def durum(self, s: str) -> None:
-        """Durum bilgisini konsola ve /kavrama/durum konusuna yayınlar ('DURUM ayrıntı' biçiminde)."""
+        """Durum bilgisini konsola, /kavrama/durum konusuna ve aktifse eylem geri bildirimine yayınlar."""
         self.get_logger().info(s)
+        self._son_durum_metni = s
         self.p_durum.publish(String(data=s))
+
+        durum_on_eki, ayrinti = durum_metni_ayristir(s)
+        if durum_on_eki in ('PLAN', 'NAV_Q', 'KURTARMA'):
+            kalan = 0.20 if durum_on_eki == 'KURTARMA' else 0.0
+            self._eylem_geri_bildirim_yayinla(
+                durum=durum_on_eki,
+                ayrinti=ayrinti,
+                kalan_mesafe_m=kalan,
+                zorla=True,
+            )
+        elif durum_on_eki == 'SON_YAKLASMA':
+            if self._fb_kisitlayici.son_durum != 'SON_YAKLASMA':
+                self._eylem_geri_bildirim_yayinla(
+                    durum='SON_YAKLASMA',
+                    ayrinti=ayrinti,
+                    kalan_mesafe_m=0.0,
+                    zorla=False,
+                )
+        elif durum_on_eki in ('HAZIR', 'HATA'):
+            self._eylem_bitti_event.set()
+
+    def _eylem_geri_bildirim_yayinla(
+        self,
+        durum: str,
+        ayrinti: str,
+        kalan_mesafe_m: float = 0.0,
+        zorla: bool = False,
+    ) -> None:
+        """Aktif eylem hedefi varsa geri bildirim mesajı yayınlar."""
+        gh = self._aktif_eylem_gh
+        if gh is None or not LIMO_INTERFACES_VAR or Kavra is None:
+            return
+
+        t_s = self._simdi_s()
+        izin = self._fb_kisitlayici.izin_var_mi(t_s, durum=durum)
+        if not zorla and not izin:
+            return
+        if zorla:
+            self._fb_kisitlayici.son_zaman_s = t_s
+            self._fb_kisitlayici.son_durum = durum
+
+        aday_sayisi = len(self.adaylar)
+        aday_no = (self.aktif_aday_idx + 1) if (aday_sayisi > 0 and self.aktif_aday_idx < aday_sayisi) else 0
+
+        fb = Kavra.Feedback()
+        geri_bildirim_doldur(
+            fb,
+            durum=durum,
+            ayrinti=ayrinti,
+            aday_no=aday_no,
+            aday_sayisi=aday_sayisi,
+            kalan_mesafe_m=kalan_mesafe_m,
+        )
+        try:
+            gh.publish_feedback(fb)
+        except Exception as e:
+            self.get_logger().debug(f'Geri bildirim yayınlama hatası: {e}')
 
     def tf2d(self, hedef: str, kaynak: str) -> tuple[float, float, float]:
         """TF ağacından kaynak->hedef 2B (x, y, yaw) dönüşümünü çeker."""
@@ -382,6 +848,133 @@ class KavramaDugumu(Node):
     def _durdur(self) -> None:
         """Robotun tekerlek hızlarını sıfırlar."""
         self.p_cmd.publish(Twist())
+
+    # --- Eylem Sunucusu Geri Çağrıları ---
+
+    def _kavra_goal_cb(self, _goal_request: Any) -> GoalResponse:
+        """Yeni eylem hedefini değerlendirir; düğüm meşgulse reddeder."""
+        with self._eylem_kilit:
+            if self._mesgul_mu():
+                self.get_logger().warn('Yeni kavra eylem hedefi reddedildi: önceki görev sürüyor')
+                return GoalResponse.REJECT
+            self._eylem_aktif = True
+            self._eylem_bitti_event.clear()
+            return GoalResponse.ACCEPT
+
+    def _kavra_cancel_cb(self, _goal_handle: Any) -> CancelResponse:
+        """Eylem iptal isteğini kabul eder."""
+        self.get_logger().info('Kavra eylem iptal isteği alındı')
+        return CancelResponse.ACCEPT
+
+    def _kavra_execute_cb(self, goal_handle: Any) -> Any:
+        """Kavra eylem hedefini mevcut durum makinesi akışıyla yürütür ve sonucu döndürür."""
+        self._aktif_eylem_gh = goal_handle
+        self._t_hedef_baslangic_s = self._simdi_s()
+        self._son_durum_metni = ''
+        self._son_nesne_robotta_xyz = (0.0, 0.0, 0.0)
+        self._son_nesne_robotta_msg = None
+        self._son_hata_cm = 0.0
+        self._son_yon_hatasi_deg = 0.0
+        self._son_sure_s = 0.0
+        self._fb_kisitlayici.sifirla()
+
+        try:
+            cozulen = eylem_hedef_coz(goal_handle.request, ayar=self.ayar)
+            self.algisiz_izinli = cozulen['algisiz_izinli']
+            nx, ny, nz = cozulen['nesne_xyz']
+            frame_id = cozulen['frame_id']
+
+            hedef_gecerli = True
+            if frame_id and frame_id != 'map':
+                try:
+                    t_fm = self.tf.lookup_transform(
+                        'map',
+                        frame_id,
+                        rclpy.time.Time(),
+                        rclpy.duration.Duration(seconds=1.0),
+                    )
+                    trans = (
+                        t_fm.transform.translation.x,
+                        t_fm.transform.translation.y,
+                        t_fm.transform.translation.z,
+                    )
+                    rot = (
+                        t_fm.transform.rotation.x,
+                        t_fm.transform.rotation.y,
+                        t_fm.transform.rotation.z,
+                        t_fm.transform.rotation.w,
+                    )
+                    nx, ny, nz = nokta_donustur_3d(trans, rot, (nx, ny, nz))
+                except Exception as e:
+                    self.durum_kodu = 'HATA'
+                    self.durum(f'HATA hedef TF map dönüşümü başarısız ({frame_id}): {e}')
+                    hedef_gecerli = False
+
+            if hedef_gecerli:
+                if self.harita is None:
+                    self.durum_kodu = 'HATA'
+                    self.durum('HATA harita parametresi boş veya yüklenmedi')
+                else:
+                    self.nesne_hedef_map = (nx, ny, nz)
+                    self.kurtarma_sayisi = 0
+                    self.aktif_aday_idx = 0
+                    self.durum_kodu = 'PLAN'
+                    self._planla()
+
+            while rclpy.ok():
+                if goal_handle.is_cancel_requested:
+                    self._iptal_cb(Empty())
+                    break
+                if self.durum_kodu in ('HAZIR', 'HATA', 'BOSTA'):
+                    break
+                self._eylem_bitti_event.wait(timeout=0.02)
+
+            toplam_sure = max(0.0, self._simdi_s() - self._t_hedef_baslangic_s)
+            sure_s = self._son_sure_s if self._son_sure_s > 0.0 else toplam_sure
+
+            sonuc = Kavra.Result()
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                sonuc_doldur(
+                    'HATA iptal',
+                    sonuc,
+                    nesne_robotta_xyz=self._son_nesne_robotta_xyz,
+                    tahmini_hata_cm=0.0,
+                    tahmini_yon_hatasi_derece=0.0,
+                    sure_s=sure_s,
+                )
+            elif self.durum_kodu == 'HAZIR':
+                goal_handle.succeed()
+                sonuc_doldur(
+                    'HAZIR',
+                    sonuc,
+                    nesne_robotta_xyz=self._son_nesne_robotta_xyz,
+                    tahmini_hata_cm=self._son_hata_cm,
+                    tahmini_yon_hatasi_derece=self._son_yon_hatasi_deg,
+                    sure_s=sure_s,
+                )
+                if self._son_nesne_robotta_msg is not None:
+                    sonuc.nesne_robotta = self._son_nesne_robotta_msg
+            else:
+                goal_handle.abort()
+                hata_metni = (
+                    self._son_durum_metni
+                    if self._son_durum_metni.startswith('HATA')
+                    else 'HATA kavrama başarısız'
+                )
+                sonuc_doldur(
+                    hata_metni,
+                    sonuc,
+                    nesne_robotta_xyz=self._son_nesne_robotta_xyz,
+                    tahmini_hata_cm=0.0,
+                    tahmini_yon_hatasi_derece=0.0,
+                    sure_s=sure_s,
+                )
+            return sonuc
+        finally:
+            with self._eylem_kilit:
+                self._aktif_eylem_gh = None
+                self._eylem_aktif = False
 
     # --- Abonelik Geri Çağrıları ---
 
@@ -458,19 +1051,25 @@ class KavramaDugumu(Node):
 
     def _hedef_cb(self, m: PointStamped) -> None:
         """/kavrama/hedef geldiğinde durum makinesini PLAN durumuna geçirir."""
-        if self.durum_kodu in ('PLAN', 'NAV_Q', 'SON_YAKLASMA', 'KURTARMA'):
-            self.durum('HATA önceki görev sürüyor')
-            return
+        with self._eylem_kilit:
+            if self._mesgul_mu():
+                uyari = 'HATA önceki görev sürüyor'
+                self.get_logger().info(uyari)
+                self.p_durum.publish(String(data=uyari))
+                return
 
-        if self.harita is None:
-            self.durum('HATA harita parametresi boş veya yüklenmedi')
-            return
+            if self.harita is None:
+                self.durum_kodu = 'HATA'
+                self.durum('HATA harita parametresi boş veya yüklenmedi')
+                return
 
-        nx, ny, nz = float(m.point.x), float(m.point.y), float(m.point.z)
-        self.nesne_hedef_map = (nx, ny, nz)
-        self.kurtarma_sayisi = 0
-        self.aktif_aday_idx = 0
-        self.durum_kodu = 'PLAN'
+            self.ayar.yon = self._varsayilan_yon_rad
+            self.algisiz_izinli = True
+            nx, ny, nz = float(m.point.x), float(m.point.y), float(m.point.z)
+            self.nesne_hedef_map = (nx, ny, nz)
+            self.kurtarma_sayisi = 0
+            self.aktif_aday_idx = 0
+            self.durum_kodu = 'PLAN'
 
         self._planla()
 
@@ -492,6 +1091,8 @@ class KavramaDugumu(Node):
         except Exception:
             rx, ry = 0.0, 0.0
 
+        self.adaylar = []
+        self.aktif_aday_idx = 0
         self.durum(f'PLAN nesne ({nx:+.2f}, {ny:+.2f}, z {nz:.2f}), robot ({rx:+.2f}, {ry:+.2f})')
 
         adaylar = yaklasim_bul(self.harita, (nx, ny), self.ayar, robot=(rx, ry), hepsi=True)
@@ -631,11 +1232,15 @@ class KavramaDugumu(Node):
         # Ölçüm kontrolü: taze /kavrama/nesne_algi var mı?
         if self.yeni_algi_var and self.son_algi_odom is not None:
             self.algisiz = False
-            self.durum(f'SON_YAKLASMA algı aktif, odom yönü {math.degrees(th_odom):+.1f}°')
+            son_baslangic_mesaji = f'SON_YAKLASMA algı aktif, odom yönü {math.degrees(th_odom):+.1f}°'
+        elif not self.algisiz_izinli:
+            self.durum_kodu = 'HATA'
+            self.durum('HATA nesne algısı yok (algisiz_izinli=False)')
+            return
         else:
             self.algisiz = True
             self.tek_olcum_verildi = False
-            self.durum(
+            son_baslangic_mesaji = (
                 f'SON_YAKLASMA algisiz: odom yönü {math.degrees(th_odom):+.1f}°, '
                 f'yedek map nesne ({self.nesne_yedek_odom[0]:+.2f}, {self.nesne_yedek_odom[1]:+.2f})'
             )
@@ -643,10 +1248,10 @@ class KavramaDugumu(Node):
         self.t_son_yaklasma_baslangic = self.get_clock().now()
         self.son_durum_log_zamani = 0.0
         self.durum_kodu = 'SON_YAKLASMA'
+        self.durum(son_baslangic_mesaji)
 
     def _hazir_isle(self, bilgi: dict) -> None:
         """HAZIR: /kavrama/nesne_robotta yayını, P hatası ve yaklaşma süresi raporu."""
-        self.durum_kodu = 'HAZIR'
         now = self.get_clock().now()
         bas_ns = self.t_son_yaklasma_baslangic.nanoseconds if self.t_son_yaklasma_baslangic else now.nanoseconds
         sure = (now.nanoseconds - bas_ns) / 1e9
@@ -676,6 +1281,13 @@ class KavramaDugumu(Node):
         else:
             e_xy = 0.0
             e_yaw = 0.0
+
+        self._son_nesne_robotta_xyz = (float(lx), float(ly), float(nz))
+        self._son_nesne_robotta_msg = out
+        self._son_hata_cm = float(e_xy * 100.0)
+        self._son_yon_hatasi_deg = float(math.degrees(e_yaw))
+        self._son_sure_s = float(sure)
+        self.durum_kodu = 'HAZIR'
 
         self.durum(
             f'HAZIR nesne robotta ({lx:+.3f}, {ly:+.3f}, {nz:.2f}) m; '
@@ -765,12 +1377,22 @@ class KavramaDugumu(Node):
         cmd.angular.z = float(w)
         self.p_cmd.publish(cmd)
 
-        # 1 Hz aralıkla periyodik durum yayını
+        rho = float(bilgi.get('rho', float('nan')))
+        algisiz_bilgi = 'algisiz ' if self.algisiz else ''
+        ayrinti_metni = f'{algisiz_bilgi}v={v:.2f} w={w:.2f} rho={rho:.2f} m'
+
+        # Eylem geri bildirimi: SON_YAKLASMA durumunda 5 Hz (kalan_mesafe_m = rho)
+        self._eylem_geri_bildirim_yayinla(
+            durum='SON_YAKLASMA',
+            ayrinti=ayrinti_metni,
+            kalan_mesafe_m=rho,
+            zorla=False,
+        )
+
+        # 1 Hz aralıkla periyodik durum yayını (/kavrama/durum)
         if (t - self.son_durum_log_zamani) > 1.0:
             self.son_durum_log_zamani = t
-            algisiz_bilgi = 'algisiz ' if self.algisiz else ''
-            rho = bilgi.get('rho', float('nan'))
-            self.durum(f'SON_YAKLASMA {algisiz_bilgi}v={v:.2f} w={w:.2f} rho={rho:.2f} m')
+            self.durum(f'SON_YAKLASMA {ayrinti_metni}')
 
     def _dongu_kurtarma(self) -> None:
         if self.durum_kodu != 'KURTARMA':
