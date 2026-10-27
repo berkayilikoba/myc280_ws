@@ -1,0 +1,223 @@
+material Oda/isiksiz/zemin
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture zemin.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_0
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_0.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_1
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_1.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_2
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_2.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_3
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_3.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_4
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_4.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_5
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_5.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_6
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_6.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_7
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_7.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_8
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_8.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_9
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_9.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_10
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_10.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_11
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_11.png
+        filtering trilinear
+      }
+    }
+  }
+}
+
+material Oda/isiksiz/duvar_12
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture duvar_12.png
+        filtering trilinear
+      }
+    }
+  }
+}

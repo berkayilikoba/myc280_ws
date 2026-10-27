@@ -21,7 +21,8 @@ python3 oda_dunya.py --yapi $C/oda_yapi.yaml --mesh_dizin $C/tsdf --doku_dizin $
   --carpisma_mesh $PWD/$C/tsdf/oda_carpisma.obj --cikti $C/lab_oda_3b.world
 # paket: varlıklar model dizinine, dünya mutlak yollar yerine model:// ile
 rm -rf $MODEL; mkdir -p $MODEL/meshes
-cp $C/tsdf/oda_mesh_kesik.obj $C/tsdf/oda_mesh.mtl $C/tsdf/oda_carpisma.obj $C/tsdf/zemin_doku.obj $C/tsdf/zemin_doku.mtl $C/tsdf/zemin.png $MODEL/meshes/
+cp $C/tsdf/oda_mesh_kesik.obj $C/tsdf/oda_carpisma.obj $C/tsdf/zemin_doku.obj $C/tsdf/*.mtl $C/tsdf/*.png $MODEL/meshes/
+cp $C/tsdf/duvar_doku_*.obj $MODEL/meshes/ 2>/dev/null || true   # ışıksız duvar OBJ'leri (oda_dunya varsayılanı)
 cp -r $C/doku/materials $MODEL/
 cat > $MODEL/model.config <<XML
 <?xml version="1.0"?>

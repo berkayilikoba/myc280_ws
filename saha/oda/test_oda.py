@@ -288,6 +288,115 @@ def test_oda_dunya_ucgen_duvardan_uzak_kalir(oda_dunya):
     assert bool(maske[0]) is False
 
 
+def test_oda_dunya_duvar_obj_ve_isiksiz_malzeme(oda_dunya, tmp_path):
+    """
+    Sentetik 1 duvarlı yapı + doku YAML ile dünya üretir:
+    - duvar_doku_0.obj üretilmiş olmalı
+    - 4 ön yüz (+ 4 arka yüz) köşe ve UV satırları bulunmalı
+    - Ön yüz üçgen normali iç normal yönünde olmalı
+    - oda_isiksiz.material içinde "lighting off" geçmeli
+    """
+    yapi_dosyasi = tmp_path / "oda_yapi_1duvar.yaml"
+    mesh_dizini = tmp_path / "mesh_dizin"
+    doku_dizini = tmp_path / "doku_dizin"
+    cikti_dunya = tmp_path / "cikti" / "isiksiz.world"
+
+    mesh_dizini.mkdir(parents=True, exist_ok=True)
+    (doku_dizini / "doku").mkdir(parents=True, exist_ok=True)
+    (doku_dizini / "materials" / "textures").mkdir(parents=True, exist_ok=True)
+    (doku_dizini / "materials" / "scripts").mkdir(parents=True, exist_ok=True)
+
+    # Sentetik PNG dosyaları
+    sahte_png = b"\x89PNG\r\n\x1a\n"
+    for png_ad in ("duvar_0.png", "zemin.png"):
+        (doku_dizini / "doku" / png_ad).write_bytes(sahte_png)
+        (doku_dizini / "materials" / "textures" / png_ad).write_bytes(sahte_png)
+
+    tavan_yuk = 2.7
+    sentetik_yapi = {
+        "oda_siniri": [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]],
+        "duvarlar": [
+            {"p1": [0.0, 0.0], "p2": [4.0, 0.0], "kalinlik": 0.15},
+        ],
+        "mobilya": [],
+    }
+    with open(yapi_dosyasi, "w", encoding="utf-8") as f:
+        yaml.safe_dump(sentetik_yapi, f)
+
+    ic_normal = [0.0, 1.0]
+    sentetik_doku = {
+        "duvarlar": [
+            {
+                "i": 0,
+                "p1": [0.0, 0.0],
+                "p2": [4.0, 0.0],
+                "yuz_normali": ic_normal,
+                "doku": "doku/duvar_0.png",
+                "malzeme": "Oda/duvar_0",
+            }
+        ],
+        "zemin": {
+            "kutu": [0.0, 0.0, 4.0, 4.0],
+            "doku": "doku/zemin.png",
+            "malzeme": "Oda/zemin",
+        },
+        "tavan": tavan_yuk,
+    }
+    with open(doku_dizini / "doku.yaml", "w", encoding="utf-8") as f:
+        yaml.safe_dump(sentetik_doku, f)
+
+    oda_dunya.dunya_uret(
+        yapi_yol=str(yapi_dosyasi),
+        mesh_dizin=str(mesh_dizini),
+        cikti_yol=str(cikti_dunya),
+        tavan=tavan_yuk,
+        doku_dizin=str(doku_dizini),
+    )
+
+    duvar_obj_yolu = mesh_dizini / "duvar_doku_0.obj"
+    assert duvar_obj_yolu.is_file(), "duvar_doku_0.obj oluşturulmadı"
+
+    satirlar = [s.strip() for s in duvar_obj_yolu.read_text(encoding="utf-8").splitlines() if s.strip()]
+    v_satirlar = [
+        [float(x) for x in s.split()[1:4]] for s in satirlar if s.startswith("v ")
+    ]
+    vt_satirlar = [
+        [float(x) for x in s.split()[1:3]] for s in satirlar if s.startswith("vt ")
+    ]
+    vn_satirlar = [
+        [float(x) for x in s.split()[1:4]] for s in satirlar if s.startswith("vn ")
+    ]
+    f_satirlar = [s.split()[1:4] for s in satirlar if s.startswith("f ")]
+
+    # Ön yüz 4 köşe (+ arka yüz 4 köşe) ve 4 UV satırı kontrolü
+    assert len(v_satirlar) >= 4, "En az 4 köşe (v) satırı olmalı"
+    assert len(vt_satirlar) == 4, "4 adet UV (vt) satırı olmalı"
+    np.testing.assert_allclose(
+        vt_satirlar, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]], atol=1e-5
+    )
+
+    # Ön yüz normali iç normal ([0, 1, 0]) yönünde olmalı
+    n_ic_3b = np.array([ic_normal[0], ic_normal[1], 0.0], dtype=float)
+    assert len(vn_satirlar) >= 1
+    assert float(np.dot(vn_satirlar[0], n_ic_3b)) > 0.99
+
+    assert len(f_satirlar) >= 2
+    ilk_ucgen = [int(tok.split("/")[0]) - 1 for tok in f_satirlar[0]]
+    p_a = np.array(v_satirlar[ilk_ucgen[0]])
+    p_b = np.array(v_satirlar[ilk_ucgen[1]])
+    p_c = np.array(v_satirlar[ilk_ucgen[2]])
+    ucgen_normali = np.cross(p_b - p_a, p_c - p_a)
+    assert float(np.dot(ucgen_normali, n_ic_3b)) > 0.0, "Ön yüz üçgen sarımı iç normal yönünde değil"
+
+    # oda_isiksiz.material kontrolü
+    isiksiz_mat_yolu = doku_dizini / "materials" / "scripts" / "oda_isiksiz.material"
+    assert isiksiz_mat_yolu.is_file(), "oda_isiksiz.material oluşturulmadı"
+    mat_icerik = isiksiz_mat_yolu.read_text(encoding="utf-8")
+    assert "lighting off" in mat_icerik
+    assert "Oda/isiksiz/duvar_0" in mat_icerik
+    assert "Oda/isiksiz/zemin" in mat_icerik
+
+
 # ==============================================================================
 # 2. ODA_DOKU TESTLERİ
 # ==============================================================================

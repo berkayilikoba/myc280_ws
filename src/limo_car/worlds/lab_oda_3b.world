@@ -13,7 +13,7 @@
       <uri>model://sun</uri>
     </include>
     <scene>
-      <ambient>0.25 0.25 0.25 1</ambient>
+      <ambient>1 1 1 1</ambient>
       <background>0.7 0.7 0.7 1</background>
       <shadows>false</shadows>
     </scene>
@@ -24,7 +24,7 @@
     <!-- Ic mekan isiklari: 4 adet nokta isik -->
     <light type="point" name="ic_isik_0">
       <pose>-0.2620 1.2015 2.5500 0 0 0</pose>
-      <diffuse>0.2 0.2 0.2 1</diffuse>
+      <diffuse>0.0 0.0 0.0 1</diffuse>
       <specular>0.1 0.1 0.1 1</specular>
       <attenuation>
         <range>8</range>
@@ -36,7 +36,7 @@
     </light>
     <light type="point" name="ic_isik_1">
       <pose>1.7380 1.2015 2.5500 0 0 0</pose>
-      <diffuse>0.2 0.2 0.2 1</diffuse>
+      <diffuse>0.0 0.0 0.0 1</diffuse>
       <specular>0.1 0.1 0.1 1</specular>
       <attenuation>
         <range>8</range>
@@ -48,7 +48,7 @@
     </light>
     <light type="point" name="ic_isik_2">
       <pose>3.7380 1.2015 2.5500 0 0 0</pose>
-      <diffuse>0.2 0.2 0.2 1</diffuse>
+      <diffuse>0.0 0.0 0.0 1</diffuse>
       <specular>0.1 0.1 0.1 1</specular>
       <attenuation>
         <range>8</range>
@@ -60,7 +60,7 @@
     </light>
     <light type="point" name="ic_isik_3">
       <pose>5.7380 1.2015 2.5500 0 0 0</pose>
-      <diffuse>0.2 0.2 0.2 1</diffuse>
+      <diffuse>0.0 0.0 0.0 1</diffuse>
       <specular>0.1 0.1 0.1 1</specular>
       <attenuation>
         <range>8</range>
@@ -97,7 +97,7 @@
             </box>
           </geometry>
           <material>
-            <ambient>0.2905 0.2608 0.2353 1.0</ambient>
+            <ambient>0.4842 0.4347 0.3921 1.0</ambient>
             <diffuse>0.4842 0.4347 0.3921 1.0</diffuse>
           </material>
         </visual>
@@ -109,6 +109,13 @@
               <uri>model://lab_oda_3b/meshes/zemin_doku.obj</uri>
             </mesh>
           </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/zemin</name>
+            </script>
+          </material>
         </visual>
       </link>
     </model>
@@ -131,8 +138,8 @@
             </box>
           </geometry>
           <material>
-            <ambient>0.552 0.552 0.552 1.0</ambient>
-            <diffuse>0.92 0.92 0.92 1.0</diffuse>
+            <ambient>0.4235 0.3647 0.3294 1.0</ambient>
+            <diffuse>0.4235 0.3647 0.3294 1.0</diffuse>
           </material>
         </visual>
       </link>
@@ -149,30 +156,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>6.0790 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 0.0510 0 0 0 0</pose>
+          <pose>-1.3359 0.7095 -1.3500 0 0 -0.0174</pose>
           <geometry>
-            <box>
-              <size>6.0790 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_0.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_0</name>
+              <name>Oda/isiksiz/duvar_0</name>
             </script>
           </material>
         </visual>
@@ -186,30 +181,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>3.8794 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 -0.0510 0 0 0 0</pose>
+          <pose>-1.4155 -2.6961 -1.3500 0 0 -0.0175</pose>
           <geometry>
-            <box>
-              <size>3.8794 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_1.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_1</name>
+              <name>Oda/isiksiz/duvar_1</name>
             </script>
           </material>
         </visual>
@@ -223,30 +206,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>1.5813 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 -0.0510 0 0 0 0</pose>
+          <pose>-4.6446 -2.6196 -1.3500 0 0 -0.0174</pose>
           <geometry>
-            <box>
-              <size>1.5813 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_2.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_2</name>
+              <name>Oda/isiksiz/duvar_2</name>
             </script>
           </material>
         </visual>
@@ -260,30 +231,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>2.2766 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 0.0510 0 0 0 0</pose>
+          <pose>1.1937 2.2449 -1.3500 0 0 1.5533</pose>
           <geometry>
-            <box>
-              <size>2.2766 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_3.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_3</name>
+              <name>Oda/isiksiz/duvar_3</name>
             </script>
           </material>
         </visual>
@@ -297,30 +256,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.5614 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 -0.0510 0 0 0 0</pose>
+          <pose>-3.0583 -1.6870 -1.3500 0 0 -0.0176</pose>
           <geometry>
-            <box>
-              <size>0.5614 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_4.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_4</name>
+              <name>Oda/isiksiz/duvar_4</name>
             </script>
           </material>
         </visual>
@@ -334,30 +281,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>1.6997 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 0.0510 0 0 0 0</pose>
+          <pose>-0.7206 5.8024 -1.3500 0 0 -1.5882</pose>
           <geometry>
-            <box>
-              <size>1.6997 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_5.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_5</name>
+              <name>Oda/isiksiz/duvar_5</name>
             </script>
           </material>
         </visual>
@@ -371,30 +306,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.5396 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 -0.0510 0 0 0 0</pose>
+          <pose>-5.5640 -1.4688 -1.3500 0 0 -0.0173</pose>
           <geometry>
-            <box>
-              <size>0.5396 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_6.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_6</name>
+              <name>Oda/isiksiz/duvar_6</name>
             </script>
           </material>
         </visual>
@@ -408,30 +331,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.6999 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 -0.0510 0 0 0 0</pose>
+          <pose>0.7321 -1.7121 -1.3500 0 0 -0.0175</pose>
           <geometry>
-            <box>
-              <size>0.6999 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_7.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_7</name>
+              <name>Oda/isiksiz/duvar_7</name>
             </script>
           </material>
         </visual>
@@ -445,30 +356,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.8224 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 -0.0510 0 0 0 0</pose>
+          <pose>1.7888 -5.3540 -1.3500 0 0 1.5534</pose>
           <geometry>
-            <box>
-              <size>0.8224 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_8.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_8</name>
+              <name>Oda/isiksiz/duvar_8</name>
             </script>
           </material>
         </visual>
@@ -482,30 +381,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.5707 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 -0.0510 0 0 0 0</pose>
+          <pose>-1.7183 -0.9998 -1.3500 0 0 -1.3567</pose>
           <geometry>
-            <box>
-              <size>0.5707 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_9.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_9</name>
+              <name>Oda/isiksiz/duvar_9</name>
             </script>
           </material>
         </visual>
@@ -519,30 +406,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.7393 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 -0.0510 0 0 0 0</pose>
+          <pose>0.1985 -1.1442 -1.3500 0 0 -1.5883</pose>
           <geometry>
-            <box>
-              <size>0.7393 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_10.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_10</name>
+              <name>Oda/isiksiz/duvar_10</name>
             </script>
           </material>
         </visual>
@@ -556,30 +431,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.5003 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 -0.0510 0 0 0 0</pose>
+          <pose>-0.4686 -4.0674 -1.3500 0 0 1.5536</pose>
           <geometry>
-            <box>
-              <size>0.5003 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_11.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_11</name>
+              <name>Oda/isiksiz/duvar_11</name>
             </script>
           </material>
         </visual>
@@ -593,30 +456,18 @@
             </box>
           </geometry>
         </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.6210 0.1000 2.7000</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.2549 0.2629 0.2659 1.0</ambient>
-            <diffuse>0.4249 0.4381 0.4431 1.0</diffuse>
-          </material>
-        </visual>
-        <!-- Doku Visual (kalinlik/2 + 0.001) -->
         <visual name="visual_doku">
-          <pose>0 -0.0510 0 0 0 0</pose>
+          <pose>1.9315 -2.8542 -1.3500 0 0 1.5533</pose>
           <geometry>
-            <box>
-              <size>0.6210 0.0020 2.7000</size>
-            </box>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_12.obj</uri>
+            </mesh>
           </geometry>
           <material>
             <script>
               <uri>model://lab_oda_3b/materials/scripts</uri>
               <uri>model://lab_oda_3b/materials/textures</uri>
-              <name>Oda/duvar_12</name>
+              <name>Oda/isiksiz/duvar_12</name>
             </script>
           </material>
         </visual>
