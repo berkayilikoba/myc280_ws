@@ -10,3 +10,7 @@ __pycache__/
 *.db3
 *.mcap
 *.mp4
+# saha/oda: üretilen dünya çıktıları ve agy günlükleri
+saha/oda/cikti/
+saha/oda/agy_*.log
+saha/oda/*.log

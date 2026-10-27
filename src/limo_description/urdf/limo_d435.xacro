@@ -3,9 +3,10 @@
      çerçeveler realsense2_camera sürücüsüyle aynı: camera_link (= sol IR / derinlik merkezi) -> camera_depth_frame ->
      camera_depth_optical_frame; camera_link -> camera_color_frame (y +0.0148, fabrika dış kalibrasyonu) ->
      camera_color_optical_frame. Gövde ölçüleri Intel realsense-ros _d435.urdf.xacro.
-     Konular gerçekteki gibi: /camera/color/image_raw (+camera_info). Derinlik Gazebo'dan /camera/depth_sim/... (32FC1, m)
-     gelir; limo_kinematics sensor_modeli düğümü gerçek D435 gürültüsü/boşluklarıyla /camera/depth/image_raw (16UC1, mm)
-     yayınlar. Kayıt profili: renk 1280x720, derinlik 848x480, 15 Hz (D435_AYAR=vlmaps2). -->
+     Konular gerçekteki gibi: /camera/color/image_raw (+camera_info) ve /camera/depth/image_raw (16UC1, mm).
+     Renk ve derinlik Gazebo'dan /camera/color_sim/... ve /camera/depth_sim/... gelir; limo_kinematics sensor_modeli
+     düğümü gerçek D435 bozulma modeliyle /camera/color/... ve /camera/depth/... yayınlar.
+     Kayıt profili: renk 1280x720, derinlik 848x480, 15 Hz (D435_AYAR=vlmaps2). -->
 <robot xmlns:xacro="http://ros.org/wiki/xacro">
 
   <xacro:macro name="limo_d435" params="parent *joint_pose renk_g:=1280 renk_y:=720 derinlik_g:=848 derinlik_y:=480 hz:=15">
@@ -66,11 +67,10 @@
           <horizontal_fov>1.22693</horizontal_fov>
           <image><width>${renk_g}</width><height>${renk_y}</height><format>R8G8B8</format></image>
           <clip><near>0.05</near><far>30</far></clip>
-          <noise><type>gaussian</type><mean>0.0</mean><stddev>0.007</stddev></noise>
         </camera>
         <plugin name="d435_renk_eklenti" filename="libgazebo_ros_camera.so">
           <ros><namespace>/camera</namespace></ros>
-          <camera_name>color</camera_name>
+          <camera_name>color_sim</camera_name>
           <frame_name>camera_color_optical_frame</frame_name>
         </plugin>
       </sensor>
