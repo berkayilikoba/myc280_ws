@@ -55,3 +55,22 @@ kalibrasyonun** sorunu; sim haritayla tutarlı.
 2. IMU: hareket titreşimi (gövde ivme/jiro gürültüsünün hıza bağlı modeli) ve ivme ölçeği/sapması sensor_modeli'ne.
 3. Sim dünyasına doku ve yüksek nesneler (masa, raf, sandalye) — kamera tabanlı işler (VIO, nesne tespiti) için.
 4. Lidar: rastgele ölçüm kaybı (%3–10) sensor_modeli'ne (simde /scan da düğümden geçirilerek).
+
+## İyileştirme turu 2 (27.10, sim-iyilestirme)
+
+Eklenenler (`sensor_modeli_dugumu.py`, gerçek kayıtlardan ölçülen değerler): IMU ivme ölçeği 1.024 + x/y sapması ve
+hıza/dönüşe bağlı titreşim gürültüsü; lidar %3.3 ölçüm kaybı (`scan_ham` → `scan`); w tepkisi gecikme 0, τ 0.16 s,
+ivme 12 rad/s² (4 kayıt, R² ort 0.937, önceki 0.925); derinlikte zemin geçerliliği %20–40 ve lekeli boşluk.
+
+| | Gerçek | Önce | Sonra |
+|---|---|---|---|
+| Hareketteki ivme σ (x, y, z) | 0.25, 0.27, 0.08 | 0.08, 0.03, 0.03 | 0.27, 0.20, 0.085 |
+| Jiroskop artığı (hareket) | 0.047 | 0.011 | 0.047 |
+| Durağan ivme ortalaması | (−0.15, −0.10, 10.04) | (0, 0, 9.80) | (−0.13, −0.09, 10.04) |
+| Lidar geçerli oran | 0.967 | 1.00 | 0.97 |
+| w tepki gecikmesi | 0.04 s | 0.36 s | 0.26 s |
+| Toplam dönüş | 1792.2° | 1792.5° | 1792.3° |
+
+Derinlik: boşluk önce geliş açısına bağlıydı → sim geçerli oranı 0.25'e düştü (gerçek 0.59; sıyırma açısındaki yan
+duvar gerçekte geçerli). Yalnız zemine uygulanacak şekilde düzeltildi, birim testleri geçiyor; **simde
+doğrulanmadı** (son oynatma bitmeden kapatıldı). Sıradaki ilk iş: oynatmayı tekrarlayıp ölçmek.
