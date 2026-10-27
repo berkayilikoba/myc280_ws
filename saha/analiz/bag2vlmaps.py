@@ -130,10 +130,11 @@ def zincir(tfs, *cerceveler):
     return yol[son]
 
 
-def kamera_dis(tfs, kalib_yolu):
+def kamera_dis(tfs, kalib_yolu, dosya_oncelikli=False):
     """base_link -> camera_link: kayıttaki /tf_static'te varsa o (nav_baslat.sh, o günkü kameranın kalibrasyonu),
-    yoksa kalibrasyon dosyası (09.10 Dabai kayıtlarında bu halka yoktu)."""
-    if ('base_link', 'camera_link') in tfs:
+    yoksa kalibrasyon dosyası (09.10 Dabai kayıtlarında bu halka yoktu). dosya_oncelikli: kayıttan sonra düzeltilmiş
+    kalibrasyonu uygulamak için (27.10: D435 y 0 -> 0.0175)."""
+    if ('base_link', 'camera_link') in tfs and not dosya_oncelikli:
         return tfs[('base_link', 'camera_link')].copy()
     kal = yaml.safe_load(open(kalib_yolu))['base_link_to_camera_link']
     return T(rpy2R(*kal['rotation_rpy_rad']), kal['translation_m'])
@@ -231,7 +232,8 @@ def main():
     ap.add_argument('kamera_bag')
     ap.add_argument('sensor_bag')
     ap.add_argument('cikti')
-    ap.add_argument('--kalib', default=os.path.join(BURADA, '..', 'config', 'kamera_kalibrasyon.yaml'))
+    ap.add_argument('--kalib', help='kalibrasyon dosyası; verilirse kayıttaki tf_static base_link->camera_link yerine '
+                    'bu kullanılır (varsayılan: tf_static, yoksa config/kamera_kalibrasyon.yaml)')
     ap.add_argument('--her', type=int, default=1, help='her N. renk karesi')
     ap.add_argument('--esik_ms', type=float, default=30.0, help='renk-derinlik eşleme eşiği')
     ap.add_argument('--bosluk_s', type=float, default=0.25, help='odom boşluğu bundan uzunsa kareyi atla')
@@ -252,12 +254,14 @@ def main():
                          'zaten uzun kenar 520 px\'e indiriyor (vlmap_builder_cam base_size); disk 4 kat azalır')
     a = ap.parse_args()
 
+    dosya_oncelikli = a.kalib is not None
+    a.kalib = a.kalib or os.path.join(BURADA, '..', 'config', 'kamera_kalibrasyon.yaml')
     kal = yaml.safe_load(open(a.kalib))['base_link_to_camera_link']
     O, tfs, ci = sensor_oku(a.sensor_bag)
     if a.poz_dosyasi:   # lidar ile düzeltilmiş poz (lidar_poz.py): dünya = harita çerçevesi
         O = np.loadtxt(a.poz_dosyasi, delimiter=',', comments='#')[:, :4]
         O[:, 3] = np.unwrap(O[:, 3])
-    T_b_cl = kamera_dis(tfs, a.kalib)
+    T_b_cl = kamera_dis(tfs, a.kalib, dosya_oncelikli)
     T_b_cl[2, 3] += a.taban_z           # base_link -> base_footprint: dünya z = 0 zemin (poses.txt z = 0)
     T_cl_co = zincir(tfs, 'camera_link', 'camera_depth_frame', 'camera_color_frame', 'camera_color_optical_frame')
     T_cl_do = zincir(tfs, 'camera_link', 'camera_depth_frame', 'camera_depth_optical_frame')
