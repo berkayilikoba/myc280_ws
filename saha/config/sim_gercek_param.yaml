@@ -1,0 +1,230 @@
+# sim_param_cikar.py çıktısı: gerçek LIMO kayıtlarından simülasyon parametreleri
+kayitlar:
+- kapsama_v2_20261027_150913
+- kapsama_20261014_155422
+- kapsama_kisapoz_20261014_164153
+- donus_yavas_20261021_142831
+- hm
+kamera:
+  color:
+    genislik: 1280
+    yukseklik: 720
+    fx: 908.975
+    fy: 908.429
+    cx: 649.849
+    cy: 379.424
+    yatay_fov_rad: 1.22693
+    dikey_fov_rad: 0.75461
+    bozulma:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    model: plumb_bob
+    cerceve: camera_color_optical_frame
+  depth:
+    genislik: 848
+    yukseklik: 480
+    fx: 429.73
+    fy: 429.73
+    cx: 423.696
+    cy: 243.081
+    yatay_fov_rad: 1.55737
+    dikey_fov_rad: 1.01868
+    bozulma:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    - 0.0
+    model: plumb_bob
+    cerceve: camera_depth_optical_frame
+    gurultu:
+      model: sigma = a * z^2
+      a: 0.00176
+      artik_rms_mm: 4.09
+      kaynak: ayar_27b.json
+    gecerli_oran_sabit_sahne: 0.529
+  tf:
+    camera_link->camera_color_optical_frame:
+      xyz:
+      - -2.0e-05
+      - 0.01482
+      - 0.0002
+      rpy:
+      - -1.56942
+      - 0.00474
+      - -1.56572
+    camera_link->camera_depth_optical_frame:
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.0
+      rpy:
+      - -1.5708
+      - -0.0
+      - -1.5708
+    base_link->camera_link:
+      xyz:
+      - 0.084
+      - 0.0175
+      - 0.028
+      rpy:
+      - 0.0015
+      - -0.0191
+      - 0.0
+imu:
+- kayit: kapsama_v2_20261027_150913
+  hz: 91.7
+  durgun_ornek: 2556
+  jiroskop_sigma:
+  - 0.00145
+  - 0.00215
+  - 0.00163
+  jiroskop_sapma:
+  - 4.8e-05
+  - 5.5e-05
+  - 5.2e-05
+  ivme_sigma:
+  - 0.0695
+  - 0.0304
+  - 0.0276
+  ivme_ortalama:
+  - -0.142
+  - -0.09
+  - 10.042
+  jiroskop_nicem_adimi_rad_s: 0.003491
+- kayit: kapsama_20261014_155422
+  hz: 92.9
+  durgun_ornek: 1813
+  jiroskop_sigma:
+  - 0.00152
+  - 0.0022
+  - 0.00191
+  jiroskop_sapma:
+  - 0.000144
+  - 8.1e-05
+  - -0.000116
+  ivme_sigma:
+  - 0.0818
+  - 0.0372
+  - 0.0274
+  ivme_ortalama:
+  - -0.145
+  - -0.097
+  - 10.044
+  jiroskop_nicem_adimi_rad_s: 0.003491
+- kayit: kapsama_kisapoz_20261014_164153
+  hz: 92.7
+  durgun_ornek: 1277
+  jiroskop_sigma:
+  - 0.00096
+  - 0.0016
+  - 0.00086
+  jiroskop_sapma:
+  - -0.000127
+  - -4.0e-05
+  - -0.000124
+  ivme_sigma:
+  - 0.0582
+  - 0.0238
+  - 0.0259
+  ivme_ortalama:
+  - -0.116
+  - -0.086
+  - 10.043
+  jiroskop_nicem_adimi_rad_s: 0.005236
+- kayit: donus_yavas_20261021_142831
+  hz: 93.4
+  durgun_ornek: 1074
+  jiroskop_sigma:
+  - 0.00095
+  - 0.00162
+  - 0.00081
+  jiroskop_sapma:
+  - 5.7e-05
+  - 2.1e-05
+  - 3.6e-05
+  ivme_sigma:
+  - 0.0265
+  - 0.0257
+  - 0.0252
+  ivme_ortalama:
+  - -0.154
+  - -0.096
+  - 10.043
+  jiroskop_nicem_adimi_rad_s: 0.003491
+- kayit: hm
+  hz: 95.3
+  durgun_ornek: 1352
+  jiroskop_sigma:
+  - 0.00121
+  - 0.00194
+  - 0.00126
+  jiroskop_sapma:
+  - 8.0e-05
+  - -0.000116
+  - -5.0e-06
+  ivme_sigma:
+  - 0.0863
+  - 0.0266
+  - 0.0275
+  ivme_ortalama:
+  - -0.144
+  - -0.095
+  - 10.044
+  jiroskop_nicem_adimi_rad_s: 0.003491
+odom:
+- kayit: kapsama_v2_20261027_150913
+  hz: 47.2
+  donus_olcegi_k_w: 0.9955
+  donus_pencere: 143
+  donus_artik_sigma_rad_per_rad: 0.0216
+  oteleme_olcegi_k_v: 1.0199
+  duz_pencere: 39
+  duz_yon_kaymasi_rad_per_m: -0.0002
+  toplam_donus_odom_rad: 31.47
+  tur_sonu_yon_farki_derece: -10.03
+- kayit: kapsama_20261014_155422
+  hz: 48.0
+  donus_olcegi_k_w: 0.9956
+  donus_pencere: 70
+  donus_artik_sigma_rad_per_rad: 0.0312
+  oteleme_olcegi_k_v: 1.0187
+  duz_pencere: 39
+  duz_yon_kaymasi_rad_per_m: -0.003
+  toplam_donus_odom_rad: 31.47
+  tur_sonu_yon_farki_derece: -7.97
+- kayit: kapsama_kisapoz_20261014_164153
+  hz: 46.5
+  donus_olcegi_k_w: 0.9939
+  donus_pencere: 83
+  donus_artik_sigma_rad_per_rad: 0.039
+  oteleme_olcegi_k_v: 1.0181
+  duz_pencere: 19
+  duz_yon_kaymasi_rad_per_m: 0.0029
+  toplam_donus_odom_rad: 46.26
+  tur_sonu_yon_farki_derece: -2.84
+- kayit: donus_yavas_20261021_142831
+  hz: 46.2
+  donus_olcegi_k_w: 0.9977
+  donus_pencere: 64
+  donus_artik_sigma_rad_per_rad: 0.0131
+  toplam_donus_odom_rad: 12.59
+  tur_sonu_yon_farki_derece: 0.57
+- kayit: hm
+  hz: 46.6
+  donus_olcegi_k_w: 0.9924
+  donus_pencere: 18
+  donus_artik_sigma_rad_per_rad: 0.0409
+  oteleme_olcegi_k_v: 1.0182
+  duz_pencere: 40
+  duz_yon_kaymasi_rad_per_m: 0.0012
+  toplam_donus_odom_rad: 6.38
+  tur_sonu_yon_farki_derece: -1.06
+odom_ozet:
+  donus_olcegi_k_w: 0.9954
+  donus_artik_sigma_rad_per_rad: 0.0267
+  oteleme_olcegi_k_v: 1.0188
+  duz_yon_kaymasi_rad_per_m: -0.0002

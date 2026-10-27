@@ -11,12 +11,18 @@
 # Kullanım: [SURE=1200] [PROFIL=640x480x30] [DPROFIL=..] [D435_AYAR=vlmaps] [EK="..."] kamera_baslat.sh   Kapatmak: kamera_dur.sh
 set -u
 source "$(dirname "$(readlink -f "$0")")/ortam.sh"
-SURE=${SURE:-1200}; PROFIL=${PROFIL:-640x480x30}; EK=${EK:-}
+SURE=${SURE:-1200}; EK=${EK:-}
 if [ "${D435_AYAR:-}" = vlmaps ]; then
   DPROFIL=${DPROFIL:-848x480x30}
   EK="-p spatial_filter.enable:=true -p temporal_filter.enable:=true -p depth_module.visual_preset:=3 $EK"
+elif [ "${D435_AYAR:-}" = vlmaps2 ]; then
+  # 27.10: zamansal süzgeç kareler arası ortalama -> hareket halinde derinlik kenarı gecikiyor (turda hiza 3.8-6 px,
+  # eski 1.9); yalnız uzamsal süzgeç + lazer 360 (sabit test 27.10: doluluk 0.48 -> 0.54, 2-4 m 0.73 -> 0.84; zamansal
+  # süzgecin "σ yarıya" kazancı zamansal σ ölçütünün doğal sonucu, hareket halinde geometriye katkısı yok)
+  PROFIL=${PROFIL:-1280x720x15}; DPROFIL=${DPROFIL:-848x480x15}
+  EK="-p spatial_filter.enable:=true -p depth_module.visual_preset:=3 -p depth_module.laser_power:=${LAZER:-360.0} $EK"
 fi
-DPROFIL=${DPROFIL:-$PROFIL}
+PROFIL=${PROFIL:-640x480x30}; DPROFIL=${DPROFIL:-$PROFIL}
 ssh -o BatchMode=yes "$ROBOT" 'pgrep -f "orbbec_camer[a]|realsense2_camera_nod[e]" >/dev/null' && { echo "kamera zaten acik"; exit 0; }
 TIP=$(kamera_tipi); echo "kamera: $TIP"
 if [ "$TIP" = d435 ]; then

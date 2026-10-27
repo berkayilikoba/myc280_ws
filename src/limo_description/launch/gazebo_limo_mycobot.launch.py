@@ -263,5 +263,16 @@ def generate_launch_description():
         package='limo_kinematics', executable='taban_modeli',
         name='taban_modeli', output='screen',
         parameters=[{'use_sim_time': use_sim_time}]))
+    # Diff: gerçek sensör kusurları (odom ölçek hatası, jiroskop nicemleme, D435 derinlik gürültüsü/boşlukları);
+    # /odom ve odom TF'i bu düğümden gelir, Gazebo gerçek konumu /odom_gercek (limo_kinematics/sensor_modeli_dugumu.py)
+    ld.add_action(DeclareLaunchArgument('odom_hatasi', default_value='true',
+                                        description='false: /odom = Gazebo gerçek konumu (eski davranış)'))
+    for bolum in ('odom_imu', 'derinlik'):   # ayrı süreçler: derinlik çözümü odom/IMU'yu geciktirmesin
+        ld.add_action(Node(
+            condition=IfCondition(PythonExpression(["'", mode, "' != 'ackermann'"])),
+            package='limo_kinematics', executable='sensor_modeli',
+            name=f'sensor_modeli_{bolum}', output='screen',
+            parameters=[{'use_sim_time': use_sim_time, 'bolum': bolum,
+                         'odom_hatasi': ParameterValue(LaunchConfiguration('odom_hatasi'), value_type=bool)}]))
 
     return ld

@@ -20,5 +20,6 @@ setup(
         'limo_kinematics = limo_kinematics.cli:main',
         'ackermann_cmd_adapter = limo_kinematics.ackermann_cmd_adapter:main',
         'taban_modeli = limo_kinematics.taban_modeli_dugumu:main',
+        'sensor_modeli = limo_kinematics.sensor_modeli_dugumu:main',
     ]},
 )

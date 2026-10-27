@@ -19,6 +19,8 @@ if [ "$TIP" = d435 ]; then
     [p720_temel]="-p depth_module.profile:=848x480x15 -p rgb_camera.profile:=1280x720x15"
     [p720_ha]="-p depth_module.profile:=848x480x15 -p rgb_camera.profile:=1280x720x15 -p depth_module.visual_preset:=3"
     [p720_suzgec]="-p depth_module.profile:=848x480x15 -p rgb_camera.profile:=1280x720x15 -p spatial_filter.enable:=true -p temporal_filter.enable:=true"
+    [p720_uzamsal]="-p depth_module.profile:=848x480x15 -p rgb_camera.profile:=1280x720x15 -p depth_module.visual_preset:=3 -p spatial_filter.enable:=true"
+    [p720_uzamsal_lazer]="-p depth_module.profile:=848x480x15 -p rgb_camera.profile:=1280x720x15 -p depth_module.visual_preset:=3 -p spatial_filter.enable:=true -p depth_module.laser_power:=360.0"
     [p720_hepsi]="-p depth_module.profile:=848x480x15 -p rgb_camera.profile:=1280x720x15 -p depth_module.visual_preset:=3 -p spatial_filter.enable:=true -p temporal_filter.enable:=true"
   )
   SIRA="${SIRA:-varsayilan cozunurluk_848 hw_hiza suzgecli lazer_yok yuksek_dogruluk vlmaps_onerilen}"

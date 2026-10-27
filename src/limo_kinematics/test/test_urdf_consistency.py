@@ -8,6 +8,7 @@ Hedef değerler ve kaynakları:
       laser : 0.105 0 0.08, YAW -0.15  (konumsal argüman sırası x y z yaw pitch roll;
               tf2_echo ile ölçüldü: RPY [0, 0, -0.150])
       camera: 0.105 0 0.1   (çerçeve adı camera_link — kamera sürücülerinin kök çerçevesi)
+  * diff modeli 27.10.2026'dan beri sahada ölçülen lidar/D435 konumlarını kullanır (SENSORS_DIFF)
       imu   : 0 0 0
 
 Bu testler xacro'yu çalıştırır; ROS ortamı ve workspace source edilmiş olmalı.
@@ -38,7 +39,14 @@ TOL = 1e-4
 
 SENSORS = {
     'laser_link': ((0.105, 0.0, 0.08), (0.0, 0.0, -0.15)),
-    'camera_link': ((0.105, 0.0, 0.1), (0.0, 0.0, 0.0)),
+    'imu_link': ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+}
+# Diff (gerçek robotun modu, FOUR_DIFF) 27.10.2026'dan beri sahada ölçülen değerleri kullanır:
+#   lidar: tarama-harita ICP (saha/analiz/lidar_kalibrasyon.py): x 0.137, y 0.015, yaw -0.1686; z AgileX 0.08
+#   kamera: D435, saha/config/kamera_kalibrasyon_d435.yaml (0.084, 0.0175, 0.028; roll 0.0015, pitch -0.0191)
+SENSORS_DIFF = {
+    'laser_link': ((0.137, 0.015, 0.08), (0.0, 0.0, -0.1686)),
+    'camera_link': ((0.084, 0.0175, 0.028), (0.0015, -0.0191, 0.0)),
     'imu_link': ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
 }
 
@@ -109,15 +117,15 @@ def test_four_diff_wheel_positions(urdfs):
 
 # ---------------------------------------------------------------- sensörler
 
-@pytest.mark.parametrize('name', sorted(ALL_SOURCES))
-@pytest.mark.parametrize('link', sorted(SENSORS))
+@pytest.mark.parametrize('name, link', [(n, l) for n in sorted(ACKERMANN_SOURCES) for l in sorted(SENSORS)] +
+                         [('description_four_diff', l) for l in sorted(SENSORS_DIFF)])
 def test_sensor_pose_matches_field_calibration(urdfs, name, link):
     root = _root(urdfs[name])
     j = _joint_to(root, link)
     assert j is not None, f'{name}: {link} yok'
     assert j.find('parent').get('link') == 'base_link', f'{name}: {link} base_link altında değil'
     o = j.find('origin')
-    xyz, rpy = SENSORS[link]
+    xyz, rpy = (SENSORS_DIFF if name == 'description_four_diff' else SENSORS)[link]
     assert _floats(o.get('xyz')) == pytest.approx(xyz, abs=TOL), f'{name}:{link} xyz'
     assert _floats(o.get('rpy')) == pytest.approx(rpy, abs=TOL), f'{name}:{link} rpy'
 
@@ -155,3 +163,16 @@ def test_check_urdf_passes(urdfs, name):
     res = subprocess.run(['check_urdf', urdfs[name]], capture_output=True, text=True)
     assert res.returncode == 0, res.stderr + res.stdout
     assert 'root Link: base_footprint' in res.stdout
+
+
+def test_four_diff_d435_frames_match_realsense_driver(urdfs):
+    """Diff sim kamerası gerçek realsense2_camera sürücüsünün çerçeve ağacını ve kayıttaki fabrika dış kalibrasyonunu
+    (camera_link -> camera_color_frame y +0.0148) kullanmalı; algı/VIO kodu sim ve gerçekte aynı çerçeveleri görür."""
+    root = _root(urdfs['description_four_diff'])
+    for child, parent, xyz in (('camera_depth_frame', 'camera_link', (0, 0, 0)),
+                               ('camera_color_frame', 'camera_link', (0, 0.0148, 0.0002)),
+                               ('camera_depth_optical_frame', 'camera_depth_frame', (0, 0, 0)),
+                               ('camera_color_optical_frame', 'camera_color_frame', (0, 0, 0))):
+        j = _joint_to(root, child)
+        assert j is not None and j.find('parent').get('link') == parent, child
+        assert _floats(j.find('origin').get('xyz')) == pytest.approx(xyz, abs=TOL), child

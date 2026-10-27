@@ -60,15 +60,19 @@
         <child link="inertial_link" />
     </joint>
 
+    <!-- Lidar: konum/yön gerçek robotta tarama-harita ICP'si ile ölçüldü (saha/analiz/lidar_kalibrasyon.py, 09.10:
+         x 0.137, y 0.015, yaw -9.66° = -0.1686 rad; ortam.sh lidar_tf_yayinla). z ölçülmedi: AgileX değeri 0.08. -->
     <xacro:limo_laser parent_prefix="base_link" frame_prefix="laser">
-        <origin xyz="0.105 0 0.08" rpy="0 0 -0.15"/>
+        <origin xyz="0.137 0.015 0.08" rpy="0 0 -0.1686"/>
     </xacro:limo_laser>
 
-    <!-- Resmi AgileX URDF (limo_description, limo_ros1): base_link -> derinlik kamerası (0.084, 0, 0.03), eğimsiz;
-         base_link yerden 0.15 m -> kamera ~0.18 m (09.10 sahada doğrulandı: yatay, lidar ile aynı yöne bakıyor). -->
-    <xacro:limo_depth_camera parent_prefix="base_link" frame_prefix="camera">
-        <origin xyz="0.084 0 0.03" rpy="0 0 0"/>
-    </xacro:limo_depth_camera>
+    <!-- Kamera: Intel RealSense D435 (14.10.2026'dan beri gerçek robotta). base_link -> camera_link
+         saha/config/kamera_kalibrasyon_d435.yaml: x 0.084 (yuva, ölçülmedi), y +0.0175 (kamera ortada, camera_link sol
+         IR), z 0.028 + roll 0.0015, pitch -0.0191 (zemin düzleminden ölçüldü, optik merkez yerden 17.8 cm). -->
+    <xacro:include filename="$(find limo_description)/urdf/limo_d435.xacro" />
+    <xacro:limo_d435 parent="base_link">
+        <origin xyz="0.084 0.0175 0.028" rpy="0.0015 -0.0191 0"/>
+    </xacro:limo_d435>
     
     <xacro:limo_imu parent_prefix="base_link" frame_prefix="imu">
         <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -165,7 +169,7 @@
         <frame_name>imu_link</frame_name>
         <ros>
           <namespace>/</namespace>
-          <remapping>~/out:=imu</remapping>
+          <remapping>~/out:=imu_ham</remapping>  <!-- sensor_modeli: 0.2°/s nicemleme -> /imu -->
         </ros>
       </plugin>
     </sensor>
@@ -257,11 +261,13 @@
              0.64 -> 0.31, salınım 3.7 -> 1.8 /m, tur 110 -> 87 s (bench/diffwobble). -->
         <plugin name="planar_move" filename="libgazebo_ros_planar_move.so">
             <!-- Komut gerçek taban modelinden geçer (limo_kinematics/taban_modeli): /cmd_vel -> cmd_vel_taban -->
-            <ros><remapping>cmd_vel:=cmd_vel_taban</remapping></ros>
+            <!-- Odom: gerçek konum /odom_gercek'e; /odom + TF odom->base_footprint'i sensor_modeli düğümü gerçek tabanın
+                 ölçülmüş odom hatasıyla (dönüş %0.46 fazla, mesafe %1.9 eksik) yayınlar (27.10.2026). -->
+            <ros><remapping>cmd_vel:=cmd_vel_taban</remapping><remapping>odom:=odom_gercek</remapping></ros>
             <update_rate>50</update_rate>
             <publish_rate>50</publish_rate>
             <publish_odom>true</publish_odom>
-            <publish_odom_tf>true</publish_odom_tf>
+            <publish_odom_tf>false</publish_odom_tf>
             <odometry_frame>odom</odometry_frame>
             <robot_base_frame>base_footprint</robot_base_frame>
         </plugin>

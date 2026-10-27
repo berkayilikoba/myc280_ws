@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Nav2 ölçüm koşusu: sabit bir hedef turunu sürer, sonuçları JSON'a yazar.
 
-Simülasyonda /odom Gazebo'nun GERÇEK konumudur (diff_drive ve ackermann_drive
+Simülasyonda /odom_gercek (diff, 27.10.2026'dan beri; yoksa /odom) Gazebo'nun GERÇEK konumudur (diff_drive ve ackermann_drive
 eklentilerinde odometry_source=1). Harita dünya dosyasından üretildiği ve robot
 (0,0,0)'da doğduğu için map == odom == dünya koordinatı; hedef hatası doğrudan
 /odom'dan ölçülür, AMCL'in kendi tahmininden değil.
@@ -98,6 +98,7 @@ class Monitor:
         self.reverse_s = 0.0
         self.last_cmd_t = None
         self.last_cmd_vx = 0.0
+        self._gercek_var = False  # /odom_gercek geldi mi (diff sim gerçek konum)
         self.planner_fail = 0
         self.ctrl_fail = 0
         self.traj = []            # (t, x, y, yaw_deg, vx) ~2 Hz
@@ -107,7 +108,10 @@ class Monitor:
         # Yalpalama ölçüsü: hareket hâlinde (vx > 0.05) yaw hızı karesi ve işaret değişimi (±0.05 histerezis)
         self.wz_sq, self.wz_n, self.wz_flips, self.wz_sign, self.move_len = 0.0, 0, 0, 0, 0.0
         self.last_cmd_wz = 0.0
-        node.create_subscription(Odometry, '/odom', self._odom, 20)
+        # diff sim (27.10.2026'dan beri): /odom gerçek tabanın hatalı odom'unu taklit eder, gerçek konum /odom_gercek.
+        # İkisi de gelirse /odom_gercek kullanılır (Ackermann'da yalnız /odom var ve o gerçek konumdur).
+        node.create_subscription(Odometry, '/odom', lambda m: None if self._gercek_var else self._odom(m), 20)
+        node.create_subscription(Odometry, '/odom_gercek', self._odom_gercek, 20)
         node.create_subscription(Path, '/plan', self._plan, 10)
         # AMCL tahmini vs gerçek konum: map == dünya == odom olduğundan fark = lokalizasyon hatası
         amcl_qos = rclpy.qos.QoSProfile(depth=5, durability=rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL)
@@ -136,6 +140,10 @@ class Monitor:
 
     def now(self):
         return self.node.get_clock().now().nanoseconds * 1e-9
+
+    def _odom_gercek(self, m):
+        self._gercek_var = True
+        self._odom(m)
 
     def _odom(self, m):
         p = m.pose.pose
