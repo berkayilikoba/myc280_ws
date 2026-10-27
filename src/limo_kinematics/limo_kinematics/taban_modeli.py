@@ -5,7 +5,7 @@ Parametreler 24.09 teleop kaydından (saha/oturum_20260924_163343/bag) sistem ta
 /cmd_vel -> [saf gecikme -> birinci derece gecikme (tau) -> ivme sınırı] x kazanç, ölçülen odom v / IMU w ile
 en küçük hata (docs/sensor_modeli.md, "Taban modeli"). R²: v 0.86, w 0.71.
 
-  v: gecikme 0.30 s, tau 0.45 s, ivme 0.15 m/s², kazanç 0.95
+  v: gecikme 0.30 s, tau 0.45 s, ivme 0.15 m/s², kazanç 0.95  (27.10: robot kayıtlarıyla 0.05 s, 0.05 s, 3.0, 1.0 — aşağıda)
   w: gecikme 0.05 s, tau 0.20 s, ivme 6.0 rad/s², kazanç 1.05
   komut kesilirse (watchdog) hedef 0: v ~1.0 s, w ~0.5 s (en iyi uyum; donanımda ayrıca doğrulanmadı)
 """
@@ -23,8 +23,12 @@ class KanalParam:
     watchdog: float  # s, bu süre komut gelmezse hedef 0
 
 
-V_VARSAYILAN = KanalParam(0.30, 0.45, 0.15, 0.95, 1.0)
-W_VARSAYILAN = KanalParam(0.05, 0.20, 6.0, 1.05, 0.5)
+# v: 27.10.2026 robotta kaydedilmiş bag'lerden yeniden uyduruldu (saha/analiz/taban_uydur.py; 4 kayıt, çapraz doğrulama
+# R² 0.98-0.99, eski değerlerle 0.85-0.88). Eski (0.30, 0.45, 0.15, 0.95) PC'de kaydedilmiş teleop verisindendi; 0.3 s
+# gecikmenin çoğu Wi-Fi'dı. w: yeni uydurma eskisinden iyi değil (doğrulama 0.946 / 0.943); yalnız kazanç, gerçek
+# kapsama turunun simde oynatılmasında toplam dönüş sim 1811° / gerçek 1792° çıktığı için 1.05 -> 1.039 (sim_real_fark).
+V_VARSAYILAN = KanalParam(0.05, 0.05, 3.0, 1.0, 1.0)
+W_VARSAYILAN = KanalParam(0.05, 0.20, 6.0, 1.039, 0.5)
 
 
 class Kanal:
