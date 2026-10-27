@@ -216,10 +216,13 @@
          tekerlek dönerken onunla birlikte döndüğü için düşük sürtünme yönü her yarım turda değişiyor, araç
          açık çevrimde düz giderken yalpalıyordu (yaw hızı std 0.117 rad/s). Artık fdir1 = dingil ekseni
          (silindirin z'si, dönüşte sabit): mu1 = yanal (kaymalı dönüş için düşük), mu2 = yuvarlanma yönü.
-         Ölçüm: scripts/diff_openloop.py -> düz sürüşte yaw std 0.001, hız 0.39/0.40 m/s. -->
+         Ölçüm: scripts/diff_openloop.py -> düz sürüşte yaw std 0.001, hız 0.39/0.40 m/s.
+         27.10.2026: mu1 = mu2 = 0. Gövdeyi planar_move taşıyor, tekerlekler tahrik edilmiyor; mu2 1.0 iken serbest
+         tekerlekler zeminde fren yapıyor, 0.15 m/s'de yolun %20'si kayboluyordu (1.425 m komut -> 1.136 m; sıfır
+         sürtünmeyle 1.425 m). Gerçek komutlarla kapsama dikdörtgeni gerçeğin ~%70'i çıkıyordu (docs/sim_real). -->
     <gazebo reference="front_left_wheel_link">
-        <mu1>0.05</mu1>
-        <mu2>1.0</mu2>
+        <mu1>0.0</mu1>
+        <mu2>0.0</mu2>
         <kp>10000000.0</kp>
         <kd>1.0</kd>
         <minDepth>0.01</minDepth>
@@ -227,8 +230,8 @@
         <maxContacts value="64"/>
     </gazebo>
     <gazebo reference="front_right_wheel_link">
-        <mu1>0.05</mu1>
-        <mu2>1.0</mu2>
+        <mu1>0.0</mu1>
+        <mu2>0.0</mu2>
         <kp>10000000.0</kp>
         <kd>1.0</kd>
         <minDepth>0.01</minDepth>
@@ -236,8 +239,8 @@
         <maxContacts value="64"/>
     </gazebo>
     <gazebo reference="rear_left_wheel_link">
-        <mu1>0.05</mu1>
-        <mu2>1.0</mu2>
+        <mu1>0.0</mu1>
+        <mu2>0.0</mu2>
         <kp>10000000.0</kp>
         <kd>1.0</kd>
         <minDepth>0.01</minDepth>
@@ -245,8 +248,8 @@
         <maxContacts value="64"/>
     </gazebo>
     <gazebo reference="rear_right_wheel_link">
-        <mu1>0.05</mu1>
-        <mu2>1.0</mu2>
+        <mu1>0.0</mu1>
+        <mu2>0.0</mu2>
         <kp>10000000.0</kp>
         <kd>1.0</kd>
         <minDepth>0.01</minDepth>
