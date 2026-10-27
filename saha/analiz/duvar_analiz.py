@@ -3,7 +3,9 @@
 
 Duraklar: /odom_duz'da robotun hareketsiz olduğu, başlangıç yönünden farklı (dönülmüş) yöndeki >=2.5 s aralıklar.
 Her durakta:
-  lidar_m        base_link -> duvar, lidar tam ön (±3° medyan) + 0.137 (laser_duz x). Lidar σ ~5 mm.
+  lidar_m        base_link -> duvar, gövde önündeki (|y| < 5 cm) lidar noktalarının x medyanı (hedef_mesafe.on_mesafe).
+                 27.10'dan önce lidar açısı 0±3° alınıyordu: laser_duz -9.66° dönük -> menzil %1.4 uzun, yani eski
+                 sonuçlarda kamera-lidar farkının mesafeyle büyüyen kısmının ~%1.4'ü bu hataydı. Lidar σ ~5 mm.
   kamera_m       görüntü merkezi 10x10 piksel derinlik medyanı + kamera x (kamera_kalibrasyon.yaml, CAD 0.084)
   fark           kamera_m - lidar_m (- = kamera daha yakın gösteriyor). Sabit kısım kamera/lidar x ofseti
                  belirsizliğini de içerir; mesafeyle değişen kısım derinlik ölçek hatasıdır.
@@ -26,9 +28,9 @@ from sensor_msgs.msg import CameraInfo, Image, LaserScan
 from tf2_msgs.msg import TFMessage
 
 from bag2vlmaps import T, damga, kamera_dis, okuyucu, q2R, zincir
+from hedef_mesafe import on_mesafe
 
 BURADA = os.path.dirname(os.path.abspath(__file__))
-LIDAR = (0.137, 0.015, 0.0)          # laser_duz: base_link'e göre (yön zaten düzeltilmiş)
 TABAN_Z = 0.15                        # base_link yerden
 
 
@@ -103,15 +105,10 @@ def main():
     print(f'{"lidar_m":>8} {"kamera_m":>8} {"fark_cm":>8} {"fark_%":>7} {"duzlem_rms_mm":>13} {"sigma_zaman_mm":>14} '
           f'{"doluluk":>8} {"kare":>5}')
     for (t1, t2), Zs in zip(D, kareler):
-        L = []
-        for ts, aci, r in taramalar:
-            if t1 <= ts <= t2:
-                k = (np.abs(np.arctan2(np.sin(aci), np.cos(aci))) < math.radians(3)) & np.isfinite(r) & (r > 0.05)
-                if k.sum() >= 3:
-                    L.append(np.median(r[k]))
+        L = [d for d in (on_mesafe(aci, r) for ts, aci, r in taramalar if t1 <= ts <= t2) if d is not None]
         if not Zs or not L:
             continue
-        d_lidar = float(np.median(L)) + LIDAR[0]                      # base_link -> duvar (tam ön)
+        d_lidar = float(np.median(L))                                 # base_link -> duvar (gövde x'i boyunca)
         Z = np.stack(Zs)
         merkez = Z[:, H // 2 - 5:H // 2 + 5, W // 2 - 5:W // 2 + 5]
         d_kam = float(np.median(merkez[merkez > 0]) + T_b_do[0, 3])   # optik eksen ~ base_link x

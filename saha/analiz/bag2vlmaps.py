@@ -247,6 +247,9 @@ def main():
                     help='yüzey normali-görüş ışını açısı bundan büyük pikselleri at (derece, 0=kapalı; ör. 70)')
     ap.add_argument('--max_w', type=float, default=0.0,
                     help='gövde açısal hızı bundan büyükse (rad/s) kareyi atla (bulanıklık/eşleme hatası; 0=kapalı)')
+    ap.add_argument('--olcek', type=float, default=1.0,
+                    help='renk (ve hizalı derinlik) çıktısını bu oranla küçült (ör. 0.5: 1280x720 -> 640x360). LSeg girdiyi '
+                         'zaten uzun kenar 520 px\'e indiriyor (vlmap_builder_cam base_size); disk 4 kat azalır')
     a = ap.parse_args()
 
     kal = yaml.safe_load(open(a.kalib))['base_link_to_camera_link']
@@ -262,6 +265,11 @@ def main():
     Kc, Dc = np.array(ci['color'].k).reshape(3, 3), np.array(ci['color'].d)
     Kd = np.array(ci['depth'].k).reshape(3, 3)
     Hc, Wc = ci['color'].height, ci['color'].width
+    Ko = Kc.copy()                                      # çıktı K (ölçekli)
+    if a.olcek != 1.0:
+        Hc, Wc = int(round(Hc * a.olcek)), int(round(Wc * a.olcek))
+        Ko[:2, :2] *= a.olcek
+        Ko[:2, 2] = (Kc[:2, 2] + 0.5) * a.olcek - 0.5
 
     # derinlik karelerini damgalarıyla belleğe al (~0.5 MB/kare); renk akışı sırayla işlenir
     derin, d_cerceve = [], None
@@ -303,12 +311,14 @@ def main():
         Tw_co = Tw_bc @ T_b_co
         T_c_d = np.linalg.inv(Tw_co) @ Tw_bd @ T_b_do        # derinlik optik (td) -> renk optik (tc)
         rgb = cv2.undistort(goruntu(m), Kc, Dc)               # ROS rational_polynomial sırası = OpenCV
+        if a.olcek != 1.0:
+            rgb = cv2.resize(rgb, (Wc, Hc), interpolation=cv2.INTER_AREA)
         dmm = derin[j][1]
         if a.kenar > 0:
             dmm = kenar_suz(dmm, a.kenar)
         if a.egim_max > 0:
             dmm = egim_suz(dmm, Kd, a.egim_max)
-        dep = derinlik_hizala(dmm, Kd, Kc, T_c_d, (Hc, Wc), zmax=a.zmax, doldur=not a.doldurma)
+        dep = derinlik_hizala(dmm, Kd, Ko, T_c_d, (Hc, Wc), zmax=a.zmax, doldur=not a.doldurma)
         cv2.imwrite(os.path.join(a.cikti, 'rgb', f'{n:06d}.png'), rgb)
         np.save(os.path.join(a.cikti, 'depth', f'{n:06d}.npy'), dep)
         for f, M in ((f_poz, Tw_bc), (f_kam, Tw_co)):
@@ -325,7 +335,7 @@ def main():
         'camera_height': round(float(T_b_co[2, 3]), 4),             # zeminden (gövde pozu = base_footprint)
         'base2cam_rot': [round(float(v), 6) for v in R_b_co.ravel()],
         'base_forward_axis': [1, 0, 0], 'base_left_axis': [0, 1, 0], 'base_up_axis': [0, 0, 1]},
-        'cam_calib_mat': [round(float(v), 4) for v in Kc.ravel()]}
+        'cam_calib_mat': [round(float(v), 4) for v in Ko.ravel()]}
     with open(os.path.join(a.cikti, 'vlmaps_config.yaml'), 'w') as f:
         f.write('# VLMaps config/map_config/vlmaps.yaml içine (pose_info + cam_calib_mat).\n'
                 '# poses.txt = gövde (mobile_base), ROS eksenleri. Kamera gövdeye göre ayrıca '
@@ -337,7 +347,7 @@ def main():
              'dunya_cercevesi': 'odom (robot açılışındaki konum), z yukarı, z=0 zemin; poses.txt = base_footprint', 'poz_kaynagi': a.poz_dosyasi or '/odom_duz',
              'sayilar': say, 'suzgecler': {'delik_doldurma': not a.doldurma, 'egim_max_deg': a.egim_max, 'zmax_m': a.zmax, 'kenar_oran': a.kenar, 'max_w_rad_s': a.max_w, 'her': a.her}, 'kalibrasyon': kal,
              'T_base_renkoptik': [[round(float(v), 6) for v in r] for r in T_b_co],
-             'renk_K': Kc.ravel().round(4).tolist(), 'renk_bozulma_giderildi': Dc.round(5).tolist(),
+             'renk_K': Ko.ravel().round(4).tolist(), 'olcek': a.olcek, 'renk_bozulma_giderildi': Dc.round(5).tolist(),
              'derinlik_K': Kd.ravel().round(4).tolist()}
     with open(os.path.join(a.cikti, 'bilgi.yaml'), 'w') as f:
         yaml.safe_dump(bilgi, f, sort_keys=False, allow_unicode=True, default_flow_style=None)

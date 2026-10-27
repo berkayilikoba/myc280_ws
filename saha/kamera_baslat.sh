@@ -5,8 +5,8 @@
 #          /camera/depth/image_rect_raw -> /camera/depth/image_raw yeniden adlandırılır (kayıt/analiz aynı konular).
 #          EK ile ek parametre: ör. EK="-p align_depth.enable:=true -p spatial_filter.enable:=true"
 #          D435_AYAR=vlmaps: VLMaps kaydı için önerilen (21.10 bulguları): derinlik 848x480 (D435 için önerilen
-#          çözünürlük), renk 640x480, uzamsal + zamansal süzgeç, High Accuracy ön ayarı (visual_preset 3 —
-#          parametre adı robotta doğrulanmalı: ros2 param describe /camera/camera depth_module.visual_preset).
+#          çözünürlük), renk 640x480, uzamsal + zamansal süzgeç, High Accuracy ön ayarı (depth_module.visual_preset 3,
+#          27.10 robotta doğrulandı: 0 Custom (sürücü varsayılanı), 1 Default, 3 High Accuracy, 4 High Density).
 #          Ayrıca kayıtta dönüşler <= 0.2 rad/s olmalı (kapsama_turu.py --spin_w 0.2).
 # Kullanım: [SURE=1200] [PROFIL=640x480x30] [DPROFIL=..] [D435_AYAR=vlmaps] [EK="..."] kamera_baslat.sh   Kapatmak: kamera_dur.sh
 set -u
