@@ -88,6 +88,7 @@ class AlgiKaydediciDugumu(Node):
         self.nesne_gercek = nesne_gercek_xyz  # Gazebo dünya koordinatları
 
         self.son_odom = None
+        self.odom_gecmis = []
         self.durum_kayitlari = []
         self.son_yaklasma_aktif = False
         self.calisiyor = True
@@ -125,6 +126,10 @@ class AlgiKaydediciDugumu(Node):
             'z': float(p.z),
             'yaw': float(yaw_q(q)),
         }
+        # Ölçüm anındaki gerçek pozu bulmak için kısa geçmiş (son ~2 s)
+        self.odom_gecmis.append(self.son_odom)
+        while self.odom_gecmis and stamp - self.odom_gecmis[0]['t'] > 2.0:
+            self.odom_gecmis.pop(0)
 
     def _durum_cb(self, msg: String) -> None:
         simdi = self.get_clock().now()
@@ -156,7 +161,7 @@ class AlgiKaydediciDugumu(Node):
             t_bf = self.tf_buffer.lookup_transform(
                 'base_footprint',
                 cerceve,
-                rclpy.time.Time(),
+                rclpy.time.Time(),  # kamera gövdeye sabit: zaman fark etmez
                 rclpy.duration.Duration(seconds=0.05),
             )
             p_bf = nokta_tf_donustur(t_bf, (px, py, pz))
@@ -165,7 +170,10 @@ class AlgiKaydediciDugumu(Node):
 
         # 2. Gazebo gerçeğiyle hata hesapla
         if p_bf is not None and self.son_odom is not None:
-            rx, ry, ryaw = self.son_odom['x'], self.son_odom['y'], self.son_odom['yaw']
+            # Gerçek poz ölçüm (görüntü) anında: en son poz kullanılırsa hareket halindeki gecikme hataya eklenir
+            t_olc = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+            od = min(self.odom_gecmis, key=lambda o: abs(o['t'] - t_olc)) if (t_olc > 0 and self.odom_gecmis) else self.son_odom
+            rx, ry, ryaw = od['x'], od['y'], od['yaw']
             x_bf_gercek, y_bf_gercek = robot_cercevesine_donustur(
                 rx, ry, ryaw, self.nesne_gercek[0], self.nesne_gercek[1]
             )

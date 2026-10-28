@@ -1108,12 +1108,24 @@ class KavramaDugumu(Node):
                 self.yeni_algi_var = True
                 return
 
-            t = self.tf.lookup_transform(
-                'odom',
-                m.header.frame_id,
-                rclpy.time.Time(),
-                rclpy.duration.Duration(seconds=0.1),
-            )
+            # Ölçüm anının dönüşümü: en son TF kullanılırsa robot hareket ederken görüntü gecikmesi kadar
+            # (5 Hz algı + kamera gecikmesi) nesne odom'da kayar. Damga yoksa / TF tamponunda yoksa en son TF.
+            try:
+                if m.header.stamp.sec == 0 and m.header.stamp.nanosec == 0:
+                    raise ValueError('damga yok')
+                t = self.tf.lookup_transform(
+                    'odom',
+                    m.header.frame_id,
+                    rclpy.time.Time.from_msg(m.header.stamp),
+                    rclpy.duration.Duration(seconds=0.1),
+                )
+            except Exception:
+                t = self.tf.lookup_transform(
+                    'odom',
+                    m.header.frame_id,
+                    rclpy.time.Time(),
+                    rclpy.duration.Duration(seconds=0.1),
+                )
             trans = (t.transform.translation.x, t.transform.translation.y, t.transform.translation.z)
             rot = (
                 t.transform.rotation.x,

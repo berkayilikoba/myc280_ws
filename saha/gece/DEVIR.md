@@ -52,3 +52,4 @@ Bitince: `ajan rapor <etiket>` → diff oku → testleri KENDİN çalıştır �
   Sahte algı gerileme: dolap 0.21 cm/0.4°, duvar 0.38 cm/0.9° (öncekinden iyi), masa beklenen hata.
   Not: renk_algi uzak ölçüm ortalaması 9.5 cm, mesaj sayısı 579→54 (boyut denetimi) — incelenecek.
 - "Nav2 açılmadı" yanlış başarısızlıkları: ros2 lifecycle CLI keşfi; betikler bekle_aktif.py'ye geçti.
+- Damga düzeltmesi (kavrama_dugumu algı TF'i ölçüm anında): kamera algısıyla −0.46 cm / 0.16°. Uzak algı hataları iki kümeli (~4 cm / ~19 cm) — incelenecek (derinlik penceresi arka plan? ikinci kırmızı leke?).
