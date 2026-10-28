@@ -240,6 +240,9 @@ def generate_launch_description():
             executable='hareketli_kalkan',
             name='hareketli_kalkan',
             output='screen',
+            # Zincirin ortasında: düşerse collision_monitor'a girdi kesilir; hemen yeniden başlat (R1 B2.1)
+            respawn=True,
+            respawn_delay=1.0,
             parameters=[{'use_sim_time': use_sim_time}],
             remappings=remappings),
 

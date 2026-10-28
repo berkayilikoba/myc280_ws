@@ -51,12 +51,14 @@ from typing import Any, Sequence
 
 import numpy as np
 import rclpy
+import rclpy.time
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
+from tf2_ros import Buffer, TransformListener
 
 try:
     from visualization_msgs.msg import Marker, MarkerArray
@@ -186,6 +188,8 @@ def tarama_noktalari(
     range_max: float,
     max_menzil: float | None = 5.0,
     lidar_x: float = 0.0,
+    lidar_y: float = 0.0,
+    lidar_yaw: float = 0.0,
 ) -> np.ndarray:
     """LaserScan menzil dizisini base_link çerçevesindeki (N, 2) kartezyen noktalara çevirir.
 
@@ -197,6 +201,8 @@ def tarama_noktalari(
         range_max: Azami geçerli menzil (m).
         max_menzil: Dikkate alınacak azami menzil eşiği (m, varsayılan 5.0).
         lidar_x: Lidar sensörünün base_link x eksenindeki ofseti (m, varsayılan 0.0).
+        lidar_y, lidar_yaw: Lidar'ın base_link'teki y ofseti (m) ve yaw'ı (rad). LIMO'da lidar
+            (0.137, 0.015, yaw -0.1686) — yaw yok sayılırsa 2 m'de ~33 cm yanal hata.
 
     Döndürür:
         (N, 2) boyutunda numpy float dizisi. Tarama sıralamasını korur.
@@ -217,8 +223,9 @@ def tarama_noktalari(
     r_secili = r[indeksler]
     acilar = float(angle_min) + indeksler * float(angle_increment)
 
+    acilar = acilar + float(lidar_yaw)
     x = r_secili * np.cos(acilar) + float(lidar_x)
-    y = r_secili * np.sin(acilar)
+    y = r_secili * np.sin(acilar) + float(lidar_y)
     return np.column_stack((x, y))
 
 
@@ -351,9 +358,8 @@ class Iz:
     @property
     def iz_yasi_s(self) -> float:
         """İzin saniye cinsinden yaşı."""
-        if self.t_son > self.t_ilk:
-            return self.t_son - self.t_ilk
-        return max(0.0, float(self.yas) * 0.1)
+        # Yalnız gerçek zaman farkı: aynı damgalı tekrar güncellemeler yaşı yapay olarak büyütmesin (R1 B1.6)
+        return max(0.0, self.t_son - self.t_ilk)
 
     def __getitem__(self, key: Any) -> Any:
         if isinstance(key, int):
@@ -808,7 +814,14 @@ class HareketliKalkan(Node):
         scan_konu = str(p('scan_topic', 'scan').value)
         odom_konu = str(p('odom_topic', 'odom').value)
 
+        # Lidar montajı: önce TF (base_link <- tarama çerçevesi, sabit; bir kez okunup saklanır), yoksa bu parametreler
         self.lidar_x = float(p('lidar_x', 0.0).value)
+        self.lidar_y = float(p('lidar_y', 0.0).value)
+        self.lidar_yaw = float(p('lidar_yaw', 0.0).value)
+        self.govde_cercevesi = str(p('govde_cercevesi', 'base_link').value)
+        self._lidar_tf_alindi = False
+        self.tf_buffer = Buffer()
+        self.tf_dinleyici = TransformListener(self.tf_buffer, self)
         self.max_menzil = float(p('max_menzil', 5.0).value)
         self.kume_esik = float(p('kume_esik', 0.10).value)
         self.kume_min_nokta = int(p('kume_min_nokta', 3).value)
@@ -884,6 +897,20 @@ class HareketliKalkan(Node):
             f"HareketliKalkan başlatıldı: {cmd_giris} -> {cmd_cikis} (etkin={self.etkin})"
         )
 
+    def _lidar_tf_oku(self, cerceve: str) -> None:
+        """base_link <- lidar sabit dönüşümünü bir kez okur; bulunamazsa parametre değerleri kalır."""
+        try:
+            t = self.tf_buffer.lookup_transform(self.govde_cercevesi, cerceve, rclpy.time.Time())
+        except Exception:
+            return
+        q = t.transform.rotation
+        self.lidar_x = float(t.transform.translation.x)
+        self.lidar_y = float(t.transform.translation.y)
+        self.lidar_yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        self._lidar_tf_alindi = True
+        self.get_logger().info(
+            f'Lidar montajı TF\'ten: x={self.lidar_x:.3f} y={self.lidar_y:.3f} yaw={math.degrees(self.lidar_yaw):.1f}°')
+
     def _simdi_s(self) -> float:
         """Düğüm saatine göre geçerli saniyeyi döndürür."""
         return self.get_clock().now().nanoseconds * 1e-9
@@ -920,6 +947,9 @@ class HareketliKalkan(Node):
         self._son_scan_t = t_scan
         self._son_scan_duvar_t = now_s
 
+        if not self._lidar_tf_alindi and msg.header.frame_id:
+            self._lidar_tf_oku(msg.header.frame_id)
+
         # Taramanın header.stamp anındaki robot pozunu odom geçmişinden doğrusal aradeğerle bul
         robot_pose = poz_aradeger(self._odom_gecmisi, t_scan)
         if robot_pose is None:
@@ -934,6 +964,8 @@ class HareketliKalkan(Node):
             range_max=float(msg.range_max),
             max_menzil=self.max_menzil,
             lidar_x=self.lidar_x,
+            lidar_y=self.lidar_y,
+            lidar_yaw=self.lidar_yaw,
         )
 
         if pts.shape[0] == 0:
@@ -1093,6 +1125,12 @@ def main(args: Any = None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        # Zincirin ortasındayız: kapanırken son komut asılı kalmasın diye sıfır hız (R1 B2.1; launch respawn eder)
+        try:
+            if rclpy.ok():
+                node.p_cmd.publish(Twist())
+        except Exception:
+            pass
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

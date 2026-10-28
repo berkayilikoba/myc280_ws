@@ -212,7 +212,7 @@ def test_duragan_nesne_kavrama_korumasi() -> None:
         vx=0.0,
         vy=0.0,
         gorulme=10,
-        yas=10,
+        yas=10, t_ilk=0.0, t_son=1.0,
     )
 
     robot_v_odom = (0.30, 0.0)
@@ -252,7 +252,7 @@ def test_karsidan_gelen_hareketli_engel_dur_ve_yavas() -> None:
         vx=-0.60,
         vy=0.0,
         gorulme=5,
-        yas=5,
+        yas=5, t_ilk=0.0, t_son=0.5,
     )
 
     karar_dur, olcek_dur, gerekce_dur = kalkan_karari(
@@ -278,7 +278,7 @@ def test_karsidan_gelen_hareketli_engel_dur_ve_yavas() -> None:
         vx=-0.60,
         vy=0.0,
         gorulme=5,
-        yas=5,
+        yas=5, t_ilk=0.0, t_son=0.5,
     )
 
     karar_yavas, olcek_yavas, gerekce_yavas = kalkan_karari(
@@ -395,9 +395,9 @@ def test_iz_silme_zaman_asimi() -> None:
 def test_kalkan_karari_coklu_iz_en_kritik_secimi() -> None:
     """Birden fazla nesne varken kalkanın en küçük TTC'ye sahip tehdidi seçmesi."""
     # 1. Durağan nesne: yakında ama durağan
-    iz_statik = Iz(id=1, x=0.6, y=0.0, r=0.1, vx=0.0, vy=0.0, gorulme=10, yas=10)
+    iz_statik = Iz(id=1, x=0.6, y=0.0, r=0.1, vx=0.0, vy=0.0, gorulme=10, yas=10, t_ilk=0.0, t_son=1.0)
     # 2. Uzakta hareketli: TTC büyük (~10 s)
-    iz_uzak = Iz(id=2, x=8.0, y=0.0, r=0.2, vx=-0.5, vy=0.0, gorulme=5, yas=5)
+    iz_uzak = Iz(id=2, x=8.0, y=0.0, r=0.2, vx=-0.5, vy=0.0, gorulme=5, yas=5, t_ilk=0.0, t_son=0.5)
     # 3. Yaklaşan tehdit: (1.5, 0.0)'da, hızı -0.8 m/s, TTC ~ 1.375 s (< 1.5 s ttc_dur)
     # min_gorulme varsayılanı 3->5 yapıldığı ve min_iz_yasi_s=0.4 s eklendiği için gorulme=5, yas=5, t_ilk=0.0, t_son=0.5
     iz_tehdit = Iz(id=3, x=1.5, y=0.0, r=0.2, vx=-0.8, vy=0.0, gorulme=5, yas=5, t_ilk=0.0, t_son=0.5)
@@ -601,3 +601,24 @@ def test_yon_tutarliligi() -> None:
 
     # Boş ölçüm -> 0.0
     assert yon_tutarliligi([]) == 0.0
+
+
+def test_tarama_noktalari_lidar_montaj_yaw() -> None:
+    """R1 B1.1: LIMO lidarı (0.137, 0.015, yaw -0.1686); yaw yok sayılırsa 2 m'de ~33 cm yanal hata."""
+    yaw = -0.1686
+    # Lidar çerçevesinde tam önde (açı 0) 2 m'lik tek nokta, base_link'te ileri-sağa düşmeli
+    pts = tarama_noktalari([2.0], 0.0, 0.01, 0.05, 10.0, max_menzil=5.0,
+                           lidar_x=0.137, lidar_y=0.015, lidar_yaw=yaw)
+    assert pts.shape == (1, 2)
+    assert pts[0, 0] == pytest.approx(0.137 + 2.0 * math.cos(yaw), abs=1e-6)
+    assert pts[0, 1] == pytest.approx(0.015 + 2.0 * math.sin(yaw), abs=1e-6)
+    assert pts[0, 1] < -0.3
+
+
+def test_iz_yasi_ayni_damga_buyumez() -> None:
+    """R1 B1.6: aynı damgalı tekrar güncellemeler iz yaşını yapay büyütmemeli."""
+    takipci = IzTakipci()
+    for _ in range(6):
+        takipci.guncelle([(1.0, 0.0)], [0.1], 5.0)
+    izler = takipci.izler()
+    assert izler and all(iz.iz_yasi_s == 0.0 for iz in izler)
