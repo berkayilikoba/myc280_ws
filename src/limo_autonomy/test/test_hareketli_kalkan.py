@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 from limo_autonomy.hareketli_kalkan import (
+    HareketliKalkan,
     Iz,
     IzTakipci,
     carpismaya_kalan_sure,
@@ -27,8 +28,10 @@ from limo_autonomy.hareketli_kalkan import (
     komutu_olcekle,
     kume_merkezleri_odoma,
     kumele,
+    odom_zaman_asimi_kontrolu,
     poz_aradeger,
     tarama_noktalari,
+    tarama_zaman_asimi_yonetimi,
     yon_tutarliligi,
 )
 
@@ -596,8 +599,10 @@ def test_yon_tutarliligi() -> None:
     assert abs(yon_tutarliligi(hizlar_duz) - 1.0) < 1e-4
 
     # Zıt yönde gidip gelen ölçümler -> tutarlılık ~0
-    hizlar_titrek = [(0.5, 0.0), (-0.5, 0.0), (0.5, 0.0), (-0.5, 0.0)]
+    hizlar_titrek = [(0.5, 0.0), (-0.5, 0.0)]
     assert yon_tutarliligi(hizlar_titrek) < 0.1
+    # son_n=4 için 4 ölçüm
+    assert yon_tutarliligi([(0.5, 0.0), (-0.5, 0.0), (0.5, 0.0), (-0.5, 0.0)], son_n=4) < 0.1
 
     # Boş ölçüm -> 0.0
     assert yon_tutarliligi([]) == 0.0
@@ -622,3 +627,259 @@ def test_iz_yasi_ayni_damga_buyumez() -> None:
         takipci.guncelle([(1.0, 0.0)], [0.1], 5.0)
     izler = takipci.izler()
     assert izler and all(iz.iz_yasi_s == 0.0 for iz in izler)
+
+
+def test_b1_3_lidar_6hz_tanima_ve_tetikleme_gecikmesi() -> None:
+    """B1.3: 6 Hz (dt ≈ 0.167 s) lidar frekansında süre temelli min_iz_yasi_s (0.35 s)
+    ve min_gorulme (3) ile 0.8 m/s yaklaşan engelin ~0.50 s içinde DUR tetiklemesi."""
+    takipci = IzTakipci(kapi=0.35, alfa=0.4, silme_suresi=0.6)
+
+    # 6 Hz lidar adımları: dt = 1/6 s ≈ 0.1667 s
+    # 0.8 m/s hızla robota (0, 0) doğru yaklaşan engel (başlangıç x=1.8 m)
+    dt = 1.0 / 6.0
+    x_baslangic = 1.80
+    v_engel = 0.80
+
+    tetiklenme_t: float | None = None
+    tetiklenme_adimi: int | None = None
+
+    for adim in range(6):  # 0 to 5 (0.0 s - 0.833 s)
+        t = adim * dt
+        x = x_baslangic - v_engel * t
+        merkezler = [(x, 0.0)]
+        takipci.guncelle(merkezler, [0.20], t, robot_wz=0.0)
+
+        # Yeni varsayılanlar: min_gorulme=3, min_iz_yasi_s=0.35, yon_tutarlilik=0.7 (son_n=3)
+        karar = kalkan_karari(
+            izler=takipci.izler(),
+            robot_v_odom=(0.0, 0.0),
+            robot_p_odom=(0.0, 0.0),
+            robot_yaricap=0.20,
+            ttc_dur=1.5,
+            ttc_yavas=3.0,
+        )
+
+        if karar.karar == 'dur':
+            tetiklenme_t = t
+            tetiklenme_adimi = adim
+            break
+
+    # 6 Hz'de min_gorulme=3 ve min_iz_yasi_s=0.35 s ile 3. adımda (t ≈ 0.50 s) tetiklenmeli
+    # (Eski min_gorulme=5 kuralında en az 4. adım / 0.67 s veya gecikmeyle 0.8 s sürüyordu)
+    assert tetiklenme_adimi is not None and tetiklenme_adimi <= 3, (
+        f"6 Hz lidarda DUR kararı {tetiklenme_adimi}. adımda ({tetiklenme_t:.3f} s) geldi; <= 3. adım olmalı!"
+    )
+    assert tetiklenme_t is not None and tetiklenme_t <= 0.55
+
+    # İzin hız ve yön tutarlılığı doğrulaması
+    iz = takipci.izler()[0]
+    assert len(iz.ham_hizlar) >= 2
+    # Ham hızların dt ile doğru hesaplandığı kontrolü (v ≈ -0.80 m/s)
+    for vx, vy in iz.ham_hizlar:
+        assert abs(vx - (-v_engel)) < 0.05
+        assert abs(vy) < 0.01
+
+    assert yon_tutarliligi(iz.ham_hizlar, son_n=3) >= 0.95
+
+
+def test_b1_4_hizli_donuste_gorulme_artmaz_sahte_dur_engellenir() -> None:
+    """B1.4: Robot hızlı dönerken (|wz| > maks_donus_hizi) hız güncellemesi atlandığında
+    görülme sayısının artmaması (iz.gorulme sabit kalması) ve sahte DUR üretilmemesi."""
+    takipci = IzTakipci(kapi=0.35, alfa=0.4, silme_suresi=0.6, maks_donus_hizi=0.8)
+
+    # 1. Adım: Durağan nesne ilk kez görülüyor (gorulme = 1)
+    t0 = 0.0
+    takipci.guncelle([(1.50, 0.0)], [0.15], t0, robot_wz=0.0)
+    assert len(takipci.izler()) == 1
+    assert takipci.izler()[0].gorulme == 1
+
+    # 2. Adım: Gürültü veya ani hareketle tek bir hız ölçümü (v = 0.25 m/s)
+    t1 = 0.167
+    takipci.guncelle([(1.542, 0.0)], [0.15], t1, robot_wz=0.0)
+    iz = takipci.izler()[0]
+    assert iz.gorulme == 2
+    assert iz.v >= 0.20
+    assert len(iz.ham_hizlar) == 1
+
+    # 3. Adımlar: Robot hızlı dönmeye başlıyor (wz = 1.0 rad/s > maks_donus_hizi = 0.8)
+    for step in range(2, 6):
+        t = step * 0.167
+        # Nesne dönen robotun görüş alanında eşleşiyor
+        takipci.guncelle([(1.542, 0.0)], [0.15], t, robot_wz=1.0)
+        iz = takipci.izler()[0]
+        # Hız güncellemesi atlandığı için görülme sayısı ARTMAYIP 2'de kalmalı!
+        assert iz.gorulme == 2, (
+            f"Hızlı dönüş sırasında {step}. adımda iz.gorulme artmamalı (beklenen 2, bulunan {iz.gorulme})"
+        )
+        assert iz.yas == step + 1
+
+        # Kalkan kararı çağrıldığında gorulme < min_gorulme (2 < 3) olduğu için 'serbest' kalmalı!
+        karar = kalkan_karari(
+            izler=takipci.izler(),
+            robot_v_odom=(0.0, 0.0),
+            robot_p_odom=(0.0, 0.0),
+            min_gorulme=3,
+            min_iz_yasi_s=0.35,
+        )
+        assert karar.karar == 'serbest', (
+            f"Hızlı dönüşte sahte DUR/YAVAS üretilmemeli! Alınan: {karar.karar} ({karar.gerekce})"
+        )
+
+
+def test_b2_2_odom_kesintisinde_kalkan_kilitli_kalmaz_serbest_ve_odom_yok() -> None:
+    """B2.2: Odom geçmişi boşaldığında veya eskidiğinde (> 0.5 s) kalkanın kilitli kalmayıp
+    izleri temizlemesi, 'serbest' karara geçmesi ve 'ODOM_YOK' durumunu yayınlaması."""
+    # 1. Saf fonksiyon odom_zaman_asimi_kontrolu testi
+    # a) Robot pozu geçerli -> zaman aşımı yok
+    assert not odom_zaman_asimi_kontrolu(10.0, (1.0, 0.0, 0.0), 9.9, odom_gecmisi_bos=False, odom_zaman_asimi=0.5)
+    # b) Robot pozu None ve odom geçmişi boş -> zaman aşımı var
+    assert odom_zaman_asimi_kontrolu(10.0, None, None, odom_gecmisi_bos=True, odom_zaman_asimi=0.5)
+    # c) Robot pozu None, son poz 0.3 s önce (<= 0.5 s) -> geçici kesinti toleransı
+    assert not odom_zaman_asimi_kontrolu(10.3, None, 10.0, odom_gecmisi_bos=False, odom_zaman_asimi=0.5)
+    # d) Robot pozu None, son poz 0.6 s önce (> 0.5 s) -> zaman aşımı!
+    assert odom_zaman_asimi_kontrolu(10.6, None, 10.0, odom_gecmisi_bos=False, odom_zaman_asimi=0.5)
+
+    # 2. HareketliKalkan düğüm mantığı testi (mock ile)
+    from unittest.mock import MagicMock
+    from sensor_msgs.msg import LaserScan
+    from std_msgs.msg import Header
+
+    node = object.__new__(HareketliKalkan)
+    node.etkin = True
+    node.takipci = IzTakipci()
+    node.odom_zaman_asimi = 0.5
+    node.tarama_zaman_asimi = 0.5
+    node.eski_tarama_tutma_s = 0.5
+    node.robot_yaricap = 0.20
+    node.min_engel_hizi = 0.20
+    node.min_gorulme = 3
+    node.min_iz_yasi_s = 0.35
+    node.yon_tutarlilik = 0.7
+    node.ttc_dur = 1.5
+    node.ttc_yavas = 3.0
+    node.max_menzil = 5.0
+    node.lidar_x = 0.0
+    node.lidar_y = 0.0
+    node.lidar_yaw = 0.0
+    node.kume_esik = 0.10
+    node.kume_min_nokta = 3
+    node.max_iz_yaricap = 0.35
+    node._lidar_tf_alindi = True
+    node._marker_yayinla = False
+    node._robot_pose_odom = (0.0, 0.0, 0.0)
+    node._robot_v_odom = (0.0, 0.0)
+    node._robot_wz = 0.0
+    node._odom_gecmisi = []
+    node._son_scan_t = None
+    node._son_scan_duvar_t = 10.0
+    node._son_gecerli_pose_t = 10.0
+    node._son_karar = 'dur'  # Odom kesilmeden önce kalkan 'dur' durumundaydı!
+    node._son_olcek = 0.0
+    node._son_gerekce = 'DUR ttc=1.1s'
+    node._onceki_gerekce = 'DUR ttc=1.1s'
+    node._son_kritik_iz = None
+    node._zaman_asimi_uyarildi = False
+    node._tarama_yok_uyarildi = False
+    node._odom_yok_uyarildi = False
+
+    node.p_cmd = MagicMock()
+    node.p_durum = MagicMock()
+    node.get_logger = MagicMock()
+
+    # t = 10.6 s'de (> 0.5 s odom kesintisi) tarama geliyor
+    scan_msg = LaserScan()
+    scan_msg.header = Header()
+    scan_msg.header.stamp.sec = 10
+    scan_msg.header.stamp.nanosec = int(0.6 * 1e9)
+    scan_msg.angle_min = -1.0
+    scan_msg.angle_increment = 0.1
+    scan_msg.range_min = 0.1
+    scan_msg.range_max = 5.0
+    scan_msg.ranges = [1.0] * 20
+
+    node._simdi_s = lambda: 10.6
+    node._scan_cb(scan_msg)
+
+    # Sonuç: Kalkan 'dur'da kilitli kalmamalı, izler silinmeli, serbest + ODOM_YOK olmalı!
+    assert node._son_karar == 'serbest', f"Karar 'serbest' olmalı, bulunan: {node._son_karar}"
+    assert node._son_olcek == 1.0
+    assert node._son_gerekce == 'ODOM_YOK'
+    assert len(node.takipci.izler()) == 0
+    assert node.p_durum.publish.call_count == 1
+    assert node.p_durum.publish.call_args[0][0].data == 'ODOM_YOK'
+
+    # İkinci taramada "ODOM_YOK" spam yapılmamalı (bir kez yayınla)
+    node._scan_cb(scan_msg)
+    assert node.p_durum.publish.call_count == 1
+
+
+def test_b2_3_tarama_zaman_asimi_dur_tutma_ve_tarama_yok() -> None:
+    """B2.3: Tarama eskidiğinde son karar 'dur' ise eski_tarama_tutma_s (0.5 s) boyunca
+    dur kararını tutma, ardından serbest + 'TARAMA_YOK' durumuna geçme."""
+    # 1. Saf fonksiyon tarama_zaman_asimi_yonetimi testi
+    # a) Taze tarama (dt = 0.3 s <= 0.5 s)
+    eylem, karar, olcek = tarama_zaman_asimi_yonetimi(10.3, 10.0, 'dur', 0.5, 0.5)
+    assert eylem == 'normal'
+    assert karar == 'dur'
+
+    # b) Tarama zaman aşımına girdi ancak tutma süresi (0.5 s) içinde (dt = 0.7 s -> dt_gecen = 0.2 s < 0.5 s)
+    eylem_tut, karar_tut, olcek_tut = tarama_zaman_asimi_yonetimi(10.7, 10.0, 'dur', 0.5, 0.5)
+    assert eylem_tut == 'dur_tut'
+    assert karar_tut == 'dur'
+    assert olcek_tut == 0.0
+
+    # c) Tutma süresi doldu (dt = 1.1 s -> dt_gecen = 0.6 s >= 0.5 s)
+    eylem_bit, karar_bit, olcek_bit = tarama_zaman_asimi_yonetimi(11.1, 10.0, 'dur', 0.5, 0.5)
+    assert eylem_bit == 'serbest_birak'
+    assert karar_bit == 'serbest'
+    assert olcek_bit == 1.0
+
+    # d) Son karar 'serbest' iken tarama zaman aşımı (tutma süresi beklenmez, doğrudan serbest)
+    eylem_s, karar_s, _ = tarama_zaman_asimi_yonetimi(10.7, 10.0, 'serbest', 0.5, 0.5)
+    assert eylem_s == 'serbest_birak'
+    assert karar_s == 'serbest'
+
+    # 2. HareketliKalkan._cmd_cb testi (mock ile)
+    from unittest.mock import MagicMock
+    from geometry_msgs.msg import Twist
+
+    node = object.__new__(HareketliKalkan)
+    node.etkin = True
+    node.takipci = IzTakipci()
+    node.tarama_zaman_asimi = 0.5
+    node.eski_tarama_tutma_s = 0.5
+    node._son_scan_duvar_t = 10.0
+    node._son_karar = 'dur'
+    node._son_olcek = 0.0
+    node._son_gerekce = 'DUR'
+    node._son_kritik_iz = None
+    node._robot_pose_odom = (0.0, 0.0, 0.0)
+    node._zaman_asimi_uyarildi = False
+    node._tarama_yok_uyarildi = False
+    node.p_cmd = MagicMock()
+    node.p_durum = MagicMock()
+    node.get_logger = MagicMock()
+
+    cmd_in = Twist()
+    cmd_in.linear.x = 0.40  # İleri hareket isteği
+
+    # t = 10.7 s'de (tutma süresi içinde, dt_gecen = 0.2 s < 0.5 s) cmd_vel geldi
+    node._simdi_s = lambda: 10.7
+    node._cmd_cb(cmd_in)
+
+    # İleri hız sıfırlanmış olmalı (DUR tutuluyor)
+    assert node.p_cmd.publish.call_count == 1
+    cikis_twist = node.p_cmd.publish.call_args[0][0]
+    assert cikis_twist.linear.x == 0.0, f"DUR tutma süresinde hız 0 olmalı; çıkan: {cikis_twist.linear.x}"
+
+    # t = 11.2 s'de (tutma süresi doldu, dt_gecen = 0.7 s >= 0.5 s) cmd_vel geldi
+    node._simdi_s = lambda: 11.2
+    node._cmd_cb(cmd_in)
+
+    # Artık serbest bırakılmış ve TARAMA_YOK yayınlanmış olmalı
+    assert node._son_karar == 'serbest'
+    assert node._son_gerekce == 'TARAMA_YOK'
+    assert node.p_durum.publish.call_count == 1
+    assert node.p_durum.publish.call_args[0][0].data == 'TARAMA_YOK'
+    cikis_twist2 = node.p_cmd.publish.call_args[0][0]
+    assert cikis_twist2.linear.x == 0.40

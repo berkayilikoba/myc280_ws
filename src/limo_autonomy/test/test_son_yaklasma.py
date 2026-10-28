@@ -492,20 +492,20 @@ def test_dondurma_rho_kucuk_sicrama_hata_uretmez():
 
 
 def test_dondurma_rho_buyuk_sicrama_hata_sapma_uretir():
-    """(2) rho>0.25'te aynı dizi (3 adet 0.5 m sıçrama) hâlâ HATA:sapma üretir (mevcut davranış korunur)."""
-    ayar = SonYaklasmaAyar(olcumsuz_mesafe=0.25, sapma_esik=0.15, aykiri_kabul_sayisi=3)
-    # Hedef nesne (0.60, 0.0), yaklasma_yaw=0.0 -> P = (0.60 - 0.22, 0.0) = (0.38, 0.0)
-    # Robot (0.0, 0.0, 0.0)'da iken rho = 0.38 m (> 0.25 m)
+    """(b / mevcut) rho=0.20'de (olcumsuz_mesafe < rho <= sapma_iptal_mesafe) aynı dizi HATA:sapma üretir."""
+    ayar = SonYaklasmaAyar(olcumsuz_mesafe=0.15, sapma_iptal_mesafe=0.30, sapma_esik=0.15, aykiri_kabul_sayisi=3)
+    # Hedef nesne (0.42, 0.0), yaklasma_yaw=0.0 -> P = (0.42 - 0.22, 0.0) = (0.20, 0.0)
+    # Robot (0.0, 0.0, 0.0)'da iken rho = 0.20 m (<= sapma_iptal_mesafe 0.30 m, > olcumsuz_mesafe 0.15 m)
     denetleyici = SonYaklasma(ayar=ayar, yaklasma_yaw_odom=0.0)
 
-    # İlk geçerli ölçüm: nesne robotun önünde 0.60 m'de
+    # İlk geçerli ölçüm: nesne robotun önünde 0.42 m'de (rho = 0.20 m)
     v0, w0, durum0, bilgi0 = denetleyici.adim(
         robot_odom_pose=(0.0, 0.0, 0.0),
         t=0.0,
-        olcum_robot_xy=(0.60, 0.0),
+        olcum_robot_xy=(0.42, 0.0),
     )
     assert durum0 in ('YAKLASIYOR', 'DONUYOR')
-    assert bilgi0['rho'] > 0.25
+    assert abs(bilgi0['rho'] - 0.20) < 1e-4
     assert bilgi0['tahmin_donduruldu'] is False
 
     # 1. ve 2. sıçramalı ölçüm (reddedilir)
@@ -513,16 +513,17 @@ def test_dondurma_rho_buyuk_sicrama_hata_sapma_uretir():
         v, w, durum, bilgi = denetleyici.adim(
             robot_odom_pose=(0.0, 0.0, 0.0),
             t=0.1 * i,
-            olcum_robot_xy=(1.10, 0.0),  # 0.50 m sıçrama
+            olcum_robot_xy=(0.92, 0.0),  # 0.50 m sıçrama
         )
         assert durum != 'HATA:sapma'
         assert bilgi['tahmin_donduruldu'] is False
 
-    # 3. sıçramalı ölçüm: aykırı kabul eşiği dolduğunda sapma_esik (0.15 m) aşıldığı için HATA:sapma üretir
+    # 3. sıçramalı ölçüm: aykırı kabul eşiği dolduğunda sapma_esik (0.15 m) aşıldığı için
+    # ve rho <= sapma_iptal_mesafe (0.20 <= 0.30) olduğu için HATA:sapma üretir
     v3, w3, durum3, bilgi3 = denetleyici.adim(
         robot_odom_pose=(0.0, 0.0, 0.0),
         t=0.3,
-        olcum_robot_xy=(1.10, 0.0),
+        olcum_robot_xy=(0.92, 0.0),
     )
     assert durum3 == 'HATA:sapma'
     assert v3 == 0.0
@@ -563,5 +564,159 @@ def test_nesne_tahmini_aykiri_kabul_sayisi_parametresi():
     # 4. aykırıda kabul edilmeli
     assert tahmin.guncelle((2.0, 1.0), t=0.4) is True
     assert tahmin.konum == (2.0, 1.0)
+
+
+def test_sapma_uzakta_yeniden_hedef():
+    """(a) rho 0.45'te 3 tutarlı 0.25 m kaymış ölçüm -> HATA yok, komut yeni hedefe yönelir, uyari 'yeniden_hedef'."""
+    ayar = SonYaklasmaAyar(
+        sapma_iptal_mesafe=0.30,
+        sapma_esik=0.15,
+        aykiri_kabul_sayisi=3,
+    )
+    # Robot (0.0, 0.0, 0.0)'da.
+    # d_kavrama = 0.22. rho = 0.45 m olması için nesne = (0.45 + 0.22, 0.0) = (0.67, 0.0).
+    # Başlangıçta yön dışarıdan verilmemiş
+    denetleyici = SonYaklasma(ayar=ayar)
+
+    # İlk geçerli ölçüm: nesne robotun önünde 0.67 m'de -> hedef P = (0.45, 0.0), rho = 0.45 m
+    v0, w0, durum0, bilgi0 = denetleyici.adim(
+        robot_odom_pose=(0.0, 0.0, 0.0),
+        t=0.0,
+        olcum_robot_xy=(0.67, 0.0),
+    )
+    assert durum0 in ('YAKLASIYOR', 'DONUYOR')
+    assert abs(bilgi0['rho'] - 0.45) < 1e-4
+    assert denetleyici.yaklasma_yaw_odom == pytest.approx(0.0, abs=1e-4)
+
+    # 3 tutarlı 0.25 m yanal kaymış ölçüm: nesne (0.67, 0.25)
+    # 1. ve 2. aykırı ölçüm reddedilir
+    for i in (1, 2):
+        v, w, durum, bilgi = denetleyici.adim(
+            robot_odom_pose=(0.0, 0.0, 0.0),
+            t=0.1 * i,
+            olcum_robot_xy=(0.67, 0.25),
+        )
+        assert durum != 'HATA:sapma'
+        assert durum in ('YAKLASIYOR', 'DONUYOR')
+
+    # 3. ölçüm: aykırı kabul eşiği dolar, sıçrama (0.25 m > sapma_esik 0.15 m) gerçekleşir.
+    # rho = 0.45 > sapma_iptal_mesafe (0.30 m) olduğu için İPTAL ETMEZ, YENİDEN HEDEFLER.
+    v3, w3, durum3, bilgi3 = denetleyici.adim(
+        robot_odom_pose=(0.0, 0.0, 0.0),
+        t=0.3,
+        olcum_robot_xy=(0.67, 0.25),
+    )
+    # HATA yok
+    assert durum3 != 'HATA:sapma'
+    assert durum3 in ('YAKLASIYOR', 'DONUYOR')
+    # uyari 'yeniden_hedef'
+    assert bilgi3.get('uyari') == 'yeniden_hedef'
+    assert denetleyici.yeniden_hedef_sayisi == 1
+    # komut yeni hedefe yönelir: nesne pozitif y'de olduğu için açısal hız w > 0 ve v > 0
+    assert w3 > 0.0
+    assert v3 > 0.0
+    # yaklaşma yönü robot->nesne doğrultusu: atan2(0.25, 0.67)
+    beklenen_yaw = math.atan2(0.25, 0.67)
+    assert denetleyici.yaklasma_yaw_odom == pytest.approx(beklenen_yaw, abs=1e-4)
+
+
+def test_sapma_yakinda_hata_sapma():
+    """(b) rho 0.20'de aynı (3 tutarlı 0.25 m kaymış ölçüm) -> HATA:sapma (mevcut davranış)."""
+    ayar = SonYaklasmaAyar(
+        olcumsuz_mesafe=0.15,
+        sapma_iptal_mesafe=0.30,
+        sapma_esik=0.15,
+        aykiri_kabul_sayisi=3,
+    )
+    # Robot (0.0, 0.0, 0.0)'da, nesne (0.42, 0.0) -> rho = 0.20 m
+    denetleyici = SonYaklasma(ayar=ayar)
+    v0, w0, durum0, bilgi0 = denetleyici.adim(
+        robot_odom_pose=(0.0, 0.0, 0.0),
+        t=0.0,
+        olcum_robot_xy=(0.42, 0.0),
+    )
+    assert durum0 in ('YAKLASIYOR', 'DONUYOR')
+    assert abs(bilgi0['rho'] - 0.20) < 1e-4
+
+    # 3 tutarlı 0.25 m kaymış ölçüm: nesne (0.42, 0.25)
+    for i in (1, 2):
+        denetleyici.adim(
+            robot_odom_pose=(0.0, 0.0, 0.0),
+            t=0.1 * i,
+            olcum_robot_xy=(0.42, 0.25),
+        )
+    v3, w3, durum3, _ = denetleyici.adim(
+        robot_odom_pose=(0.0, 0.0, 0.0),
+        t=0.3,
+        olcum_robot_xy=(0.42, 0.25),
+    )
+    # rho <= sapma_iptal_mesafe (0.20 <= 0.30) olduğu için iptal edilir
+    assert durum3 == 'HATA:sapma'
+    assert v3 == 0.0
+    assert w3 == 0.0
+
+
+def test_sapma_maks_yeniden_hedef_asimi():
+    """(c) maks_yeniden_hedef (vars. 2) aşılırsa HATA:sapma (sonsuz döngü engeli)."""
+    ayar = SonYaklasmaAyar(
+        sapma_iptal_mesafe=0.30,
+        sapma_esik=0.15,
+        aykiri_kabul_sayisi=3,
+        maks_yeniden_hedef=2,
+    )
+    denetleyici = SonYaklasma(ayar=ayar)
+
+    # Başlangıç: nesne (0.70, 0.0) -> rho = 0.48 m
+    denetleyici.adim((0.0, 0.0, 0.0), t=0.0, olcum_robot_xy=(0.70, 0.0))
+
+    # 1. sıçrama: nesne (0.70, 0.20) -> fark 0.20 > 0.15
+    for i in (1, 2):
+        denetleyici.adim((0.0, 0.0, 0.0), t=0.1 * i, olcum_robot_xy=(0.70, 0.20))
+    _, _, durum1, bilgi1 = denetleyici.adim((0.0, 0.0, 0.0), t=0.3, olcum_robot_xy=(0.70, 0.20))
+    assert durum1 != 'HATA:sapma'
+    assert denetleyici.yeniden_hedef_sayisi == 1
+    assert bilgi1.get('uyari') == 'yeniden_hedef'
+
+    # 2. sıçrama: nesne (0.70, -0.20) -> fark 0.40 > 0.15
+    for i in (4, 5):
+        denetleyici.adim((0.0, 0.0, 0.0), t=0.1 * i, olcum_robot_xy=(0.70, -0.20))
+    _, _, durum2, bilgi2 = denetleyici.adim((0.0, 0.0, 0.0), t=0.6, olcum_robot_xy=(0.70, -0.20))
+    assert durum2 != 'HATA:sapma'
+    assert denetleyici.yeniden_hedef_sayisi == 2
+    assert bilgi2.get('uyari') == 'yeniden_hedef'
+
+    # 3. sıçrama: nesne (0.70, 0.25) -> fark 0.45 > 0.15 -> maks_yeniden_hedef (2) aşılır!
+    for i in (7, 8):
+        denetleyici.adim((0.0, 0.0, 0.0), t=0.1 * i, olcum_robot_xy=(0.70, 0.25))
+    v3, w3, durum3, _ = denetleyici.adim((0.0, 0.0, 0.0), t=0.9, olcum_robot_xy=(0.70, 0.25))
+    assert durum3 == 'HATA:sapma'
+    assert v3 == 0.0
+    assert w3 == 0.0
+
+
+def test_sapma_disaridan_yaw_degismez():
+    """(d) Yön dışarıdan verilmişse yeniden hedeflemede yaklasma_yaw_odom değişmez."""
+    ayar = SonYaklasmaAyar(
+        sapma_iptal_mesafe=0.30,
+        sapma_esik=0.15,
+        aykiri_kabul_sayisi=3,
+    )
+    sabit_yaw = math.radians(20.0)
+    denetleyici = SonYaklasma(ayar=ayar, yaklasma_yaw_odom=sabit_yaw)
+
+    # Başlangıç ölçümü: nesne (0.70, 0.0) -> rho > 0.30
+    denetleyici.adim((0.0, 0.0, 0.0), t=0.0, olcum_robot_xy=(0.70, 0.0))
+    assert denetleyici.yaklasma_yaw_odom == pytest.approx(sabit_yaw)
+
+    # 3 adet sıçramalı ölçüm: nesne (0.70, 0.30)
+    for i in (1, 2):
+        denetleyici.adim((0.0, 0.0, 0.0), t=0.1 * i, olcum_robot_xy=(0.70, 0.30))
+    v, w, durum, bilgi = denetleyici.adim((0.0, 0.0, 0.0), t=0.3, olcum_robot_xy=(0.70, 0.30))
+
+    assert durum != 'HATA:sapma'
+    assert denetleyici.yeniden_hedef_sayisi == 1
+    assert bilgi.get('uyari') == 'yeniden_hedef'
+    # Dışarıdan verildiği için yaklasma_yaw_odom DEĞİŞMEZ
+    assert denetleyici.yaklasma_yaw_odom == pytest.approx(sabit_yaw)
 
 

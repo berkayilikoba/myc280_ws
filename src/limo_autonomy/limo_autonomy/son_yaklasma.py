@@ -39,6 +39,8 @@ class SonYaklasmaAyar:
     olcum_zaman_asimi: float = 1.0      # ölçüm gelmezse zaman aşımı (s)
     sapma_esik: float = 0.15     # tahmin edilen hedefin ani sıçrama eşiği (m)
     aykiri_kabul_sayisi: int = 3 # nesne tahmini ardışık aykırı kabul sayısı eşiği
+    sapma_iptal_mesafe: float = 0.30    # bu mesafenin üzerinde tahmin sıçramasında iptal yerine yeniden hedeflenir (m)
+    maks_yeniden_hedef: int = 2         # izin verilen azami yeniden hedefleme sayısı
     geri_izin: bool = True       # hedef arkada kalırsa kısa geri manevraya izin ver
     max_sure: float = 40.0       # görev için azami süre (s)
 
@@ -195,6 +197,8 @@ class SonYaklasma:
     ) -> None:
         self.ayar = ayar if ayar is not None else SonYaklasmaAyar()
         self.yaklasma_yaw_odom = yaklasma_yaw_odom
+        self._yaw_disaridan_verildi: bool = yaklasma_yaw_odom is not None
+        self.yeniden_hedef_sayisi: int = 0
         self.nesne_tahmin = NesneTahmini(
             alfa=0.4,
             esik_aykiri=0.10,
@@ -239,6 +243,7 @@ class SonYaklasma:
 
         dt = (t - self.onceki_t) if self.onceki_t is not None else 0.0
         self.onceki_t = t
+        uyari: str | None = self._son_uyari
 
         # Güvenlik engeli kontrolü
         if guvenlik_mesafe is not None and guvenlik_mesafe < 0.05:
@@ -269,8 +274,32 @@ class SonYaklasma:
                     self.nesne_tahmin.y - onceki_konum[1],  # type: ignore[operator]
                 )
                 if sicrama > self.ayar.sapma_esik:
-                    self.onceki_v = 0.0
-                    return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
+                    # Sıçrama anında robot->hedef mesafesi rho
+                    if self.onceki_hedef is not None:
+                        rho_sicrama = math.hypot(self.onceki_hedef[0] - rx, self.onceki_hedef[1] - ry)
+                    elif self.yaklasma_yaw_odom is not None:
+                        hedef_eski = hedef_pozu(onceki_konum, self.yaklasma_yaw_odom, self.ayar)
+                        rho_sicrama = math.hypot(hedef_eski[0] - rx, hedef_eski[1] - ry)
+                    else:
+                        yaw_tahmin = math.atan2(onceki_konum[1] - ry, onceki_konum[0] - rx)
+                        hedef_eski = hedef_pozu(onceki_konum, yaw_tahmin, self.ayar)
+                        rho_sicrama = math.hypot(hedef_eski[0] - rx, hedef_eski[1] - ry)
+
+                    if rho_sicrama > self.ayar.sapma_iptal_mesafe:
+                        if self.yeniden_hedef_sayisi >= self.ayar.maks_yeniden_hedef:
+                            self.onceki_v = 0.0
+                            return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
+
+                        self.yeniden_hedef_sayisi += 1
+                        self._son_uyari = 'yeniden_hedef'
+                        uyari = 'yeniden_hedef'
+                        if not self._yaw_disaridan_verildi and self.nesne_tahmin.konum is not None:
+                            ox_y, oy_y = self.nesne_tahmin.konum
+                            self.yaklasma_yaw_odom = math.atan2(oy_y - ry, ox_y - rx)
+                        self.onceki_hedef = None
+                    else:
+                        self.onceki_v = 0.0
+                        return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
 
             # Yaklaşma yönü verilmemişse ilk ölçümde robot->nesne doğrultusu sabitlenir
             if self.yaklasma_yaw_odom is None and self.nesne_tahmin.konum is not None:
@@ -300,8 +329,23 @@ class SonYaklasma:
         if not self._tahmin_donduruldu and self.onceki_hedef is not None:
             hedef_sicrama = math.hypot(px - self.onceki_hedef[0], py - self.onceki_hedef[1])
             if hedef_sicrama > self.ayar.sapma_esik:
-                self.onceki_v = 0.0
-                return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
+                rho_sicrama = math.hypot(self.onceki_hedef[0] - rx, self.onceki_hedef[1] - ry)
+                if rho_sicrama > self.ayar.sapma_iptal_mesafe:
+                    if self.yeniden_hedef_sayisi >= self.ayar.maks_yeniden_hedef:
+                        self.onceki_v = 0.0
+                        return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
+
+                    self.yeniden_hedef_sayisi += 1
+                    self._son_uyari = 'yeniden_hedef'
+                    uyari = 'yeniden_hedef'
+                    if not self._yaw_disaridan_verildi:
+                        self.yaklasma_yaw_odom = math.atan2(oy - ry, ox - rx)
+                        hedef = hedef_pozu((ox, oy), self.yaklasma_yaw_odom, self.ayar)
+                        px, py, th_g = hedef
+                    self.onceki_hedef = None
+                else:
+                    self.onceki_v = 0.0
+                    return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
         self.onceki_hedef = hedef
 
         # Hata hesapları:
@@ -337,6 +381,7 @@ class SonYaklasma:
                 olcum_yasi=olcum_yasi,
                 e_ileri=e_ileri,
                 e_yanal=e_yanal,
+                uyari=uyari,
             )
             return (0.0, 0.0, 'HATA:zaman_asimi', bilgi)
 
@@ -397,7 +442,7 @@ class SonYaklasma:
             if ileri_tamam and yaw_tamam and (yanal_tamam or yanal_uyari):
                 self._tamamlandi = True
                 self.onceki_v = 0.0
-                uyari = 'yanal' if (not yanal_tamam and yanal_uyari) else None
+                uyari = 'yanal' if (not yanal_tamam and yanal_uyari) else self._son_uyari
                 self._son_uyari = uyari
                 bilgi = self._bilgi(
                     rho=rho,
@@ -460,6 +505,7 @@ class SonYaklasma:
                 olcum_yasi=olcum_yasi,
                 e_ileri=e_ileri,
                 e_yanal=e_yanal,
+                uyari=uyari,
             )
             return (v, w, durum, bilgi)
 
@@ -562,6 +608,7 @@ class SonYaklasma:
             olcum_yasi=olcum_yasi,
             e_ileri=e_ileri,
             e_yanal=e_yanal,
+            uyari=uyari,
         )
         return (v, w, durum, bilgi)
 

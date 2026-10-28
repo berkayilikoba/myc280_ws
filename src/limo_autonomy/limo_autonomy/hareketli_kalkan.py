@@ -150,12 +150,12 @@ def poz_aradeger(
     return (float(gecmis[-1][1]), float(gecmis[-1][2]), float(gecmis[-1][3]))
 
 
-def yon_tutarliligi(ham_hizlar: Sequence[tuple[float, float]], son_n: int = 5) -> float:
+def yon_tutarliligi(ham_hizlar: Sequence[tuple[float, float]], son_n: int = 3) -> float:
     """Son N ham hız ölçümünün ortalama birim vektörünün uzunluğunu hesaplar.
 
     Parametreler:
         ham_hizlar: İzin ham hız ölçümleri listesi [(vx, vy), ...].
-        son_n: Değerlendirilecek son ölçüm sayısı (varsayılan 5).
+        son_n: Değerlendirilecek son ölçüm sayısı (varsayılan 3).
 
     Döndürür:
         Birim vektörlerin ortalamasının büyüklüğü (0.0 - 1.0).
@@ -523,7 +523,7 @@ class IzTakipci:
             iz.y = cy
             iz.r = cr
             iz.t_son = t_val
-            if i not in belirsiz_izler:
+            if i not in belirsiz_izler and not hiz_guncelle_atla:
                 iz.gorulme += 1
             iz.yas += 1
 
@@ -659,8 +659,8 @@ def kalkan_karari(
     robot_p_odom: tuple[float, float] | Sequence[float] = (0.0, 0.0),
     robot_yaricap: float = 0.20,
     min_engel_hizi: float = 0.20,
-    min_gorulme: int = 5,
-    min_iz_yasi_s: float = 0.4,
+    min_gorulme: int = 3,
+    min_iz_yasi_s: float = 0.35,
     yon_tutarlilik: float = 0.7,
     ttc_dur: float = 1.5,
     ttc_yavas: float = 3.0,
@@ -668,8 +668,8 @@ def kalkan_karari(
     """Hareketli izleri inceleyerek kalkan kararını (dur / yavas / serbest) üretir.
 
     Kural:
-        Yalnız HAREKETLİ izler (|v_iz| >= min_engel_hizi vars. 0.20 m/s, gorulme >= min_gorulme vars. 5,
-        iz_yasi_s >= min_iz_yasi_s vars. 0.4 s ve yon_tutarliligi >= yon_tutarlilik vars. 0.7) dikkate alınır.
+        Yalnız HAREKETLİ izler (|v_iz| >= min_engel_hizi vars. 0.20 m/s, gorulme >= min_gorulme vars. 3,
+        iz_yasi_s >= min_iz_yasi_s vars. 0.35 s ve yon_tutarliligi >= yon_tutarlilik vars. 0.7, son N=3) dikkate alınır.
         Durağan nesneler (kavrama hedefi, mobilya) ASLA tetiklemez.
         TTC < ttc_dur (vars. 1.5 s) -> 'dur', olcek = 0.0
         TTC < ttc_yavas (vars. 3.0 s) -> 'yavas', olcek doğrusal (ttc_dur'da 0.0, ttc_yavas'ta 1.0)
@@ -706,9 +706,9 @@ def kalkan_karari(
         if yas_s < float(min_iz_yasi_s):
             continue
 
-        # 4. Hız yön tutarlılığı kontrolü
+        # 4. Hız yön tutarlılığı kontrolü (son N=3 ham hız)
         ham_hizlar = getattr(iz, 'ham_hizlar', [])
-        if yon_tutarliligi(ham_hizlar, son_n=5) < float(yon_tutarlilik):
+        if yon_tutarliligi(ham_hizlar, son_n=3) < float(yon_tutarlilik):
             continue
 
         p_rel = (iz.x - rx, iz.y - ry)
@@ -791,6 +791,79 @@ def komutu_olcekle(
     return (vx_out, wz_out)
 
 
+def odom_zaman_asimi_kontrolu(
+    now_s: float,
+    robot_pose: tuple[float, float, float] | None,
+    son_gecerli_pose_t: float | None,
+    odom_gecmisi_bos: bool,
+    odom_zaman_asimi: float = 0.5,
+) -> bool:
+    """Robot pozu aradeğerle bulunamadığında odomun boşalıp/eskidiğini (> odom_zaman_asimi) denetler (B2.2).
+
+    Parametreler:
+        now_s: Geçerli zaman (s).
+        robot_pose: poz_aradeger sonucu veya None.
+        son_gecerli_pose_t: En son geçerli robot pozunun zamanı (s).
+        odom_gecmisi_bos: Odom geçmişi tamponunun boş olup olmadığı.
+        odom_zaman_asimi: Odom zaman aşımı süresi (s, varsayılan 0.5).
+
+    Döndürür:
+        True: Odom geçmişi boş veya > 0.5 s eski; izler silinmeli, karar 'serbest' olmalı (ODOM_YOK).
+        False: Poz geçerli veya kesinti henüz eşiği (0.5 s) aşmadı.
+    """
+    if robot_pose is not None:
+        return False
+
+    if odom_gecmisi_bos:
+        return True
+
+    if son_gecerli_pose_t is None:
+        return True
+
+    return (float(now_s) - float(son_gecerli_pose_t)) > float(odom_zaman_asimi)
+
+
+def tarama_zaman_asimi_yonetimi(
+    now_s: float,
+    son_scan_duvar_t: float | None,
+    son_karar: str,
+    tarama_zaman_asimi: float = 0.5,
+    eski_tarama_tutma_s: float = 0.5,
+) -> tuple[str, str, float]:
+    """Tarama zaman aşımı durumunda kararı ve uygulanacak eylemi belirler (B2.3).
+
+    Kural:
+        - Tarama taze ise (dt <= tarama_zaman_asimi): 'normal' çalışma.
+        - Tarama eski ve son karar 'dur' ise: eski_tarama_tutma_s boyunca 'dur_tut' (karar 'dur', ölçek 0.0).
+        - eski_tarama_tutma_s dolduğunda veya son karar 'dur' değilse: 'serbest_birak' (karar 'serbest', TARAMA_YOK).
+
+    Parametreler:
+        now_s: Geçerli zaman damgası (s).
+        son_scan_duvar_t: Son geçerli tarama zamanı (s) veya None.
+        son_karar: Son kalkan kararı ('dur', 'yavas', 'serbest').
+        tarama_zaman_asimi: Taramayı eski sayma eşiği (s, varsayılan 0.5).
+        eski_tarama_tutma_s: 'dur' kararının korunma süresi (s, varsayılan 0.5).
+
+    Döndürür:
+        (eylem, yeni_karar, yeni_olcek)
+        eylem: 'normal' (taze tarama), 'dur_tut' (tutma süresinde dur kararı tutuluyor),
+               'serbest_birak' (tutma süresi doldu veya dur değildi; serbest bırakıldı).
+    """
+    if son_scan_duvar_t is None:
+        return ('serbest_birak', 'serbest', 1.0)
+
+    dt = float(now_s) - float(son_scan_duvar_t)
+    if dt <= float(tarama_zaman_asimi):
+        return ('normal', son_karar, 0.0 if son_karar == 'dur' else 1.0)
+
+    # Tarama zaman aşımına girdi (dt > tarama_zaman_asimi)
+    dt_gecen = dt - float(tarama_zaman_asimi)
+    if son_karar == 'dur' and dt_gecen < float(eski_tarama_tutma_s):
+        return ('dur_tut', 'dur', 0.0)
+
+    return ('serbest_birak', 'serbest', 1.0)
+
+
 # ---------------------------------------------------------------------------
 # 2. ROS 2 Düğümü: HareketliKalkan
 # ---------------------------------------------------------------------------
@@ -836,12 +909,14 @@ class HareketliKalkan(Node):
 
         self.robot_yaricap = float(p('robot_yaricap', 0.20).value)
         self.min_engel_hizi = float(p('min_engel_hizi', 0.20).value)
-        self.min_gorulme = int(p('min_gorulme', 5).value)
-        self.min_iz_yasi_s = float(p('min_iz_yasi_s', 0.4).value)
+        self.min_gorulme = int(p('min_gorulme', 3).value)
+        self.min_iz_yasi_s = float(p('min_iz_yasi_s', 0.35).value)
         self.yon_tutarlilik = float(p('yon_tutarlilik', 0.7).value)
         self.ttc_dur = float(p('ttc_dur', 1.5).value)
         self.ttc_yavas = float(p('ttc_yavas', 3.0).value)
         self.tarama_zaman_asimi = float(p('tarama_zaman_asimi', 0.5).value)
+        self.eski_tarama_tutma_s = float(p('eski_tarama_tutma_s', 0.5).value)
+        self.odom_zaman_asimi = float(p('odom_zaman_asimi', 0.5).value)
 
         # İz Takipçisi
         self.takipci = IzTakipci(
@@ -858,12 +933,15 @@ class HareketliKalkan(Node):
         self._odom_gecmisi: list[tuple[float, float, float, float]] = []
         self._son_scan_t: float | None = None
         self._son_scan_duvar_t: float | None = None
+        self._son_gecerli_pose_t: float | None = None
         self._son_karar: str = 'serbest'
         self._son_olcek: float = 1.0
         self._son_gerekce: str = 'serbest'
         self._onceki_gerekce: str | None = None
         self._son_kritik_iz: Iz | None = None
         self._zaman_asimi_uyarildi: bool = False
+        self._tarama_yok_uyarildi: bool = False
+        self._odom_yok_uyarildi: bool = False
 
         # Yayıncılar
         self.p_cmd = self.create_publisher(Twist, cmd_cikis, 10)
@@ -934,6 +1012,12 @@ class HareketliKalkan(Node):
         vy_odom = vx_r * s + vy_r * c
         self._robot_v_odom = (vx_odom, vy_odom)
 
+        # Simülasyon sıfırlaması (zamanın geriye gitmesi) koruması (B1.2)
+        if self._odom_gecmisi and t_odom < self._odom_gecmisi[-1][0]:
+            self._odom_gecmisi.clear()
+            self.takipci.sifirla()
+            self._son_gecerli_pose_t = None
+
         # Odom geçmişi tamponunu güncelle (son 1 saniye)
         self._odom_gecmisi.append((t_odom, float(pos.x), float(pos.y), float(yaw)))
         esik_t = t_odom - 1.0
@@ -945,7 +1029,6 @@ class HareketliKalkan(Node):
         t_scan = t_msg if t_msg > 0.0 else now_s
 
         self._son_scan_t = t_scan
-        self._son_scan_duvar_t = now_s
 
         if not self._lidar_tf_alindi and msg.header.frame_id:
             self._lidar_tf_oku(msg.header.frame_id)
@@ -953,8 +1036,35 @@ class HareketliKalkan(Node):
         # Taramanın header.stamp anındaki robot pozunu odom geçmişinden doğrusal aradeğerle bul
         robot_pose = poz_aradeger(self._odom_gecmisi, t_scan)
         if robot_pose is None:
-            # Tampon aralığı dışındaysa veya 0.2 s'den uzaksa taramayı izleyiciye verme
+            # B2.2: Odom geçmişi boşaldı/eskidi (poz_aradeger None, > 0.5 s) ise
+            # son karar KİLİTLİ kalmasın: izleri temizle, karar 'serbest',
+            # /hareketli_kalkan/durum'a "ODOM_YOK" bir kez yayınla, uyar.
+            if odom_zaman_asimi_kontrolu(
+                now_s=now_s,
+                robot_pose=robot_pose,
+                son_gecerli_pose_t=self._son_gecerli_pose_t,
+                odom_gecmisi_bos=(len(self._odom_gecmisi) == 0),
+                odom_zaman_asimi=self.odom_zaman_asimi,
+            ):
+                self.takipci.sifirla()
+                self._son_karar = 'serbest'
+                self._son_olcek = 1.0
+                self._son_gerekce = 'ODOM_YOK'
+                self._son_kritik_iz = None
+
+                if not self._odom_yok_uyarildi:
+                    self._odom_yok_uyarildi = True
+                    self.get_logger().warn(
+                        "Odom geçmişi boş veya eski (>0.5s); izler temizlendi, karar 'serbest' (ODOM_YOK)."
+                    )
+                    durum_msg = String()
+                    durum_msg.data = "ODOM_YOK"
+                    self.p_durum.publish(durum_msg)
             return
+
+        self._son_gecerli_pose_t = now_s
+        self._son_scan_duvar_t = now_s
+        self._odom_yok_uyarildi = False
 
         pts = tarama_noktalari(
             ranges=msg.ranges,
@@ -1064,27 +1174,67 @@ class HareketliKalkan(Node):
             self.p_cmd.publish(msg)
             return
 
-        # 2. Tarama zaman aşımı denetimi
+        # 2. Tarama zaman aşımı denetimi (B2.3)
         now_s = self._simdi_s()
-        eski_mi = False
-        if self._son_scan_duvar_t is None:
-            eski_mi = True
-        else:
-            dt = now_s - self._son_scan_duvar_t
-            if dt > self.tarama_zaman_asimi:
-                eski_mi = True
+        eylem, yeni_karar, yeni_olcek = tarama_zaman_asimi_yonetimi(
+            now_s=now_s,
+            son_scan_duvar_t=self._son_scan_duvar_t,
+            son_karar=self._son_karar,
+            tarama_zaman_asimi=self.tarama_zaman_asimi,
+            eski_tarama_tutma_s=self.eski_tarama_tutma_s,
+        )
 
-        if eski_mi:
-            if not self._zaman_asimi_uyarildi:
+        if eylem == 'dur_tut':
+            # B2.3: son karar 'dur' ise eski_tarama_tutma_s (vars. 0.5) boyunca dur'u tut
+            engel_yon_x = 1.0
+            if self._son_kritik_iz is not None and self._robot_pose_odom is not None:
+                rx, ry, ryaw = self._robot_pose_odom
+                dx = self._son_kritik_iz.x - rx
+                dy = self._son_kritik_iz.y - ry
+                c = math.cos(ryaw)
+                s = math.sin(ryaw)
+                x_base = c * dx + s * dy
+                engel_yon_x = 1.0 if x_base >= 0.0 else -1.0
+
+            vx_cikis, wz_cikis = komutu_olcekle(
+                vx=msg.linear.x,
+                wz=msg.angular.z,
+                karar='dur',
+                olcek=0.0,
+                engel_yon_x=engel_yon_x,
+            )
+            out = Twist()
+            out.linear.x = vx_cikis
+            out.linear.y = 0.0
+            out.linear.z = msg.linear.z
+            out.angular.x = msg.angular.x
+            out.angular.y = msg.angular.y
+            out.angular.z = wz_cikis
+            self.p_cmd.publish(out)
+            return
+
+        if eylem == 'serbest_birak':
+            # eski_tarama_tutma_s doldu veya son karar dur değildi: serbest + "TARAMA_YOK"
+            self.takipci.sifirla()
+            self._son_karar = 'serbest'
+            self._son_olcek = 1.0
+            self._son_gerekce = 'TARAMA_YOK'
+            self._son_kritik_iz = None
+
+            if not self._tarama_yok_uyarildi:
                 self.get_logger().warn(
                     f"Tarama verisi eski (>{self.tarama_zaman_asimi}s) veya yok, "
-                    "hareketli kalkan devre dışı; komut doğrudan aktarılıyor."
+                    "hareketli kalkan serbest bırakılıyor (TARAMA_YOK)."
                 )
-                self._zaman_asimi_uyarildi = True
+                self._tarama_yok_uyarildi = True
+                durum_msg = String()
+                durum_msg.data = "TARAMA_YOK"
+                self.p_durum.publish(durum_msg)
+
             self.p_cmd.publish(msg)
             return
 
-        self._zaman_asimi_uyarildi = False
+        self._tarama_yok_uyarildi = False
 
         # 3. Engelin robot çerçevesindeki yönünü hesapla
         engel_yon_x = 1.0
