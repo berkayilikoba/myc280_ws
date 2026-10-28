@@ -3,7 +3,8 @@
 Beklenen sayılar elle hesaplandı ve üç bağımsız kaynaktan geliyor:
   * limo_base/include/limo_base/limo_driver.h:130-132  (gerçek robot sürücüsü)
       max_inner_angle_ = 0.48869 (28°), track_ = 0.172, wheelbase_ = 0.2
-  * limo_description/urdf/limo_ackerman.xacro          (fixture: limo_description_ackermann.urdf)
+  * upstream limo_description/urdf/limo_ackerman.xacro (fixture: limo_description_ackermann.urdf;
+      xacro depodan kaldırıldı, fixture ayrıştırıcı testi için anlık görüntü olarak duruyor)
   * limo_car/gazebo/ackermann_with_sensor.xacro        (fixture: limo_car_sim_ackermann.urdf)
 
 Footprint iç teğet yarıçap beklentileri Nav2'nin çalışan yığında verdiği değerle

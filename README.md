@@ -11,6 +11,7 @@ kamera/odom veri seti kaydı; gerçek ölçümlerle beslenmiş Gazebo 11 simüla
 | Kayıtlardaki kamera karelerine poz eşlemek (dış kalibrasyon, çerçeve zinciri) | [`saha/config/kamera_kalibrasyon.yaml`](saha/config/kamera_kalibrasyon.yaml) |
 | Simülasyonda Nav2 / kontrolcü denemek | [Simülasyon](#simülasyon) |
 | Robotun odom/sensör davranışını anlamak | [`docs/odom_analizi.md`](docs/odom_analizi.md), [`docs/sensor_modeli.md`](docs/sensor_modeli.md) |
+| Gerçek robotta EKF (teker + IMU) çalıştırmak, başlangıca dönüş hatasını ölçmek | [`src/limo_localization`](src/limo_localization) (`ekf.launch.py`, `drive_pattern`, `donus_hatasi`) |
 
 ## Robot
 
@@ -46,9 +47,19 @@ ssh-copy-id agilex@192.168.0.200          # saha betikleri parolasız SSH ister
 | `src/limo_description`, `src/limo_car`, `src/mycobot_description` | URDF/xacro, Gazebo modelleri ve dünyalar |
 | `src/limo_kinematics` | Kinematik hesapları, sim taban tepki modeli (`taban_modeli`), testler |
 | `src/limo_autonomy` | Görev planlayıcı + `patrol` düğümü + testler |
+| `src/limo_localization` | robot_localization EKF (`config/ekf_robot.yaml`), dikdörtgen sürüş (`drive_pattern`), başlangıca dönüş ölçümü (`donus_hatasi`), RTAB-Map RGB-D görsel odometri + testler |
 | `src/limo_base`, `src/limo_msgs` | Humble sürücü çatalı (yaw ölü bandı parametreli; robotta henüz kullanılmıyor), mesajlar |
 | `docker/` | Jetson için Humble imajı (henüz robotta derlenmedi; şu an gerek yok) |
 | `docs/` | Bulgular ve ölçümler |
+
+## Testler
+
+```bash
+colcon test && colcon test-result --verbose
+```
+
+gtest (`limo_base` kinematiği), pytest (`limo_kinematics`, `limo_autonomy`, `limo_localization`; URDF testleri
+`xacro` ister, workspace source edilmiş olmalı) ve ament lint testleri.
 
 ## Simülasyon
 

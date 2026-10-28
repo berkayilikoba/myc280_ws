@@ -1,8 +1,10 @@
 # Autor: Zhui Li
 # E-Mail: lz554113510@gmail.com
-# Company: Institut für Intermodale Transport- und Logistiksysteme in Technische Universität Braunschweig
+# Company: Institut für Intermodale Transport- und Logistiksysteme,
+#          Technische Universität Braunschweig
 # Description: Diese py-Datei basiert auf Regeln und definiert Funktionen durch python,
-# um Lauch der Simulation in Rviz ermöglichen. Durch die Visualisierung in Rviz kann man deutlich die Modelle verstehen.
+# um Lauch der Simulation in Rviz ermöglichen. Durch die Visualisierung in Rviz kann man
+# deutlich die Modelle verstehen.
 # Es gibt nur Aufbau und Aussehen von Modell. Diese Launch-Datei dient zu Ackermann-Type.
 
 from ament_index_python.packages import get_package_share_path
@@ -15,9 +17,9 @@ from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
+
 def generate_launch_description():
     limo_car_path = get_package_share_path('limo_car')
-    # default_model_path = limo_car_path / 'urdf/limo_ackerman_base.xacro'
     default_model_path = limo_car_path / 'gazebo/ackermann_with_sensor.xacro'
     default_rviz_config_path = limo_car_path / 'rviz/urdf.rviz'
 
@@ -25,7 +27,8 @@ def generate_launch_description():
                                     description='Flag to enable joint_state_publisher_gui')
     model_arg = DeclareLaunchArgument(name='model', default_value=str(default_model_path),
                                       description='Absolute path to robot urdf file')
-    rviz_arg = DeclareLaunchArgument(name='rvizconfig', default_value=str(default_rviz_config_path),
+    rviz_arg = DeclareLaunchArgument(name='rvizconfig',
+                                     default_value=str(default_rviz_config_path),
                                      description='Absolute path to rviz config file')
 
     robot_description = ParameterValue(Command(['xacro ', LaunchConfiguration('model')]),

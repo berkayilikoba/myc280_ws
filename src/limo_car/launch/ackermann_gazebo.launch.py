@@ -1,9 +1,10 @@
 # Autor: Zhui Li
 # E-Mail: lz554113510@gmail.com
-# Company: Institut für Intermodale Transport- und Logistiksysteme in Technische Universität Braunschweig
+# Company: Institut für Intermodale Transport- und Logistiksysteme,
+#          Technische Universität Braunschweig
 # Description: Diese py-Datei basiert auf Regeln und definiert Funktionen durch python,
-# um den Launch der Simulation in Gazebo zu ermöglichen. Danach mit der Simulation in Gazebo kann man die weitere
-# Forschung arbeiten. Diese Launch-Datei dient zu Ackermann-Type.
+# um den Launch der Simulation in Gazebo zu ermöglichen. Danach mit der Simulation in Gazebo
+# kann man die weitere Forschung arbeiten. Diese Launch-Datei dient zu Ackermann-Type.
 
 import os
 
@@ -18,6 +19,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 from launch_ros.actions import Node
 
+
 def generate_launch_description():
 
     # definiert Path für Modell
@@ -29,7 +31,8 @@ def generate_launch_description():
     world_path = os.path.join(pkg_path, world_file_path)
     default_rviz_config_path = os.path.join(pkg_path, rviz_path)
 
-    rviz_arg = DeclareLaunchArgument(name='rvizconfig', default_value=str(default_rviz_config_path),
+    rviz_arg = DeclareLaunchArgument(name='rvizconfig',
+                                     default_value=str(default_rviz_config_path),
                                      description='Absolute path to rviz config file')
     rviz_node = Node(
         package='rviz2',
@@ -47,7 +50,7 @@ def generate_launch_description():
 
     mbot = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(
-            get_package_share_directory(package_name),'launch', 'ackermann.launch.py'
+            get_package_share_directory(package_name), 'launch', 'ackermann.launch.py'
         )]), launch_arguments={'use_sim_time': 'true', 'world': world_path}.items()
     )
 
@@ -67,8 +70,8 @@ def generate_launch_description():
                                    '-Y', spawn_yaw_val],
                         output='screen')
 
-
-    # Gazebo ackermann_drive angular.z'yi direksiyon açısı sayar; bkz. limo_kinematics/ackermann_cmd_adapter
+    # Gazebo ackermann_drive angular.z'yi direksiyon açısı sayar;
+    # bkz. limo_kinematics/ackermann_cmd_adapter
     cmd_adapter = Node(package='limo_kinematics', executable='ackermann_cmd_adapter',
                        name='ackermann_cmd_adapter', output='screen',
                        parameters=[{'use_sim_time': True}])

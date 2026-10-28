@@ -18,7 +18,6 @@ def generate_launch_description():
     robot_name_in_model = 'limo_mycobot'
     rviz_config_file_path = 'rviz/urdf.rviz'
     urdf_file_path = 'urdf/limo_mycobot.xacro'
-    world_file_path = 'worlds/neighborhood.world'
 
     # Pose where we want to spawn the robot
     spawn_x_val = '0.0'
@@ -30,7 +29,7 @@ def generate_launch_description():
     pkg_gazebo_ros = FindPackageShare(package='gazebo_ros').find('gazebo_ros')
     pkg_share = FindPackageShare(package=package_name).find(package_name)
     pkg_mycobot = FindPackageShare(package='mycobot_description').find('mycobot_description')
-    
+
     try:
         pkg_limo_car = FindPackageShare(package='limo_car').find('limo_car')
         world_path = os.path.join(pkg_limo_car, 'worlds', 'empty_world.model')
@@ -59,16 +58,16 @@ def generate_launch_description():
     except Exception:
         pass
     current_model_path = os.environ.get('GAZEBO_MODEL_PATH', '')
-    os.environ['GAZEBO_MODEL_PATH'] = ':'.join(gazebo_model_paths) + ((':' + current_model_path) if current_model_path else '')
+    if current_model_path:
+        gazebo_model_paths.append(current_model_path)
+    os.environ['GAZEBO_MODEL_PATH'] = ':'.join(gazebo_model_paths)
 
     # Launch configuration variables specific to simulation
     use_sim_time = LaunchConfiguration('use_sim_time', default='true')
     gui = LaunchConfiguration('gui')
     headless = LaunchConfiguration('headless')
-    namespace = LaunchConfiguration('namespace')
     rviz_config_file = LaunchConfiguration('rviz_config_file')
     urdf_model = LaunchConfiguration('urdf_model')
-    use_namespace = LaunchConfiguration('use_namespace')
     use_robot_state_pub = LaunchConfiguration('use_robot_state_pub')
     use_rviz = LaunchConfiguration('use_rviz')
     use_simulator = LaunchConfiguration('use_simulator')
@@ -96,22 +95,11 @@ def generate_launch_description():
         description='Flag to enable joint_state_publisher_gui'
     )
 
-    declare_namespace_cmd = DeclareLaunchArgument(
-        name='namespace',
-        default_value='',
-        description='Top-level namespace'
-    )
-
-    declare_use_namespace_cmd = DeclareLaunchArgument(
-        name='use_namespace',
-        default_value='False',
-        description='Whether to apply a namespace to the navigation stack'
-    )
-
     declare_kol_kilit_cmd = DeclareLaunchArgument(
         name='kol_kilit',
         default_value='true',
-        description='true: myCobot eklemleri fixed (simde kolu tutan kontrolcü yok, yoksa kol çöküp lidarı kapatır)'
+        description='true: myCobot eklemleri fixed '
+                    '(simde kolu tutan kontrolcü yok, yoksa kol çöküp lidarı kapatır)'
     )
 
     declare_rviz_config_file_cmd = DeclareLaunchArgument(
@@ -166,7 +154,8 @@ def generate_launch_description():
             # xacro'nun taşıdığı bir XML yorumundaki 'kelime:' bile launch'ı düşürür
             # ("mapping values are not allowed here"). display_*.launch.py'ler de böyle.
             'robot_description': ParameterValue(
-                Command(['xacro ', urdf_model, ' mode:=', mode, ' kol_kilit:=', kol_kilit]), value_type=str),
+                Command(['xacro ', urdf_model, ' mode:=', mode, ' kol_kilit:=', kol_kilit]),
+                value_type=str),
             'use_sim_time': use_sim_time
         }]
     )
@@ -200,15 +189,18 @@ def generate_launch_description():
 
     # Start Gazebo server
     start_gazebo_server_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(pkg_gazebo_ros, 'launch', 'gzserver.launch.py')),
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_gazebo_ros, 'launch', 'gzserver.launch.py')),
         condition=IfCondition(use_simulator),
         launch_arguments={'world': world}.items()
     )
 
     # Start Gazebo client
     start_gazebo_client_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(pkg_gazebo_ros, 'launch', 'gzclient.launch.py')),
-        condition=IfCondition(PythonExpression(["'", use_simulator, "'.lower() == 'true' and '", headless, "'.lower() != 'true'"]))
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_gazebo_ros, 'launch', 'gzclient.launch.py')),
+        condition=IfCondition(PythonExpression([
+            "'", use_simulator, "'.lower() == 'true' and '", headless, "'.lower() != 'true'"]))
     )
 
     # Launch the robot
@@ -235,8 +227,6 @@ def generate_launch_description():
     ld.add_action(declare_mode_cmd)
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_use_joint_state_publisher_cmd)
-    ld.add_action(declare_namespace_cmd)
-    ld.add_action(declare_use_namespace_cmd)
     ld.add_action(declare_rviz_config_file_cmd)
     ld.add_action(declare_simulator_cmd)
     ld.add_action(declare_urdf_model_path_cmd)
@@ -261,8 +251,9 @@ def generate_launch_description():
         package='limo_kinematics', executable='ackermann_cmd_adapter',
         name='ackermann_cmd_adapter', output='screen',
         parameters=[{'use_sim_time': use_sim_time}]))
-    # Diff: planar_move komutu anında uygular, gerçek taban ise gecikmeli/ağır tepki verir. Taban modeli
-    # /cmd_vel'i ölçülmüş tepkiyle cmd_vel_taban'a çevirir (limo_kinematics/taban_modeli.py).
+    # Diff: planar_move komutu anında uygular, gerçek taban ise gecikmeli/ağır tepki verir.
+    # Taban modeli /cmd_vel'i ölçülmüş tepkiyle cmd_vel_taban'a çevirir
+    # (limo_kinematics/taban_modeli.py).
     ld.add_action(Node(
         condition=IfCondition(PythonExpression(["'", mode, "' != 'ackermann'"])),
         package='limo_kinematics', executable='taban_modeli',
