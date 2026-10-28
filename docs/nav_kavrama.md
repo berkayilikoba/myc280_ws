@@ -1,6 +1,6 @@
 # Nav2 + Kavrama Mimarisi ve Ekip Kullanım Rehberi
 
-Bu belge; AgileX LIMO mobil robotu ve üzerine entegre Elephant Robotics myCobot 280 robot kolu için geliştirilen otonom seyrüsefer (Nav2), yaklaşma planlaması, RViz görselleştirmesi ve kapalı çevrim kavrama mimarisini ayrıntılandırmaktadır. Hedef okuyucu kitlesi; görsel odometri (VO) üzerinde çalışan ekip arkadaşımız, robot kolu manipülasyonu üzerinde çalışan ekip arkadaşımız ve sistemin bakımını/geliştirmesini sürdürecek araştırmacılardır.
+Bu belge; AgileX LIMO mobil robotu ve üzerine entegre Elephant Robotics myCobot 280 robot kolu için geliştirilen otonom seyrüsefer (Nav2), yaklaşma planlaması, hız/güvenlik zinciri, RViz görselleştirmesi, görev yönetimi ve kapalı çevrim kavrama mimarisini ayrıntılandırmaktadır. Hedef okuyucu kitlesi; görsel odometri (VO) üzerinde çalışan ekip arkadaşımız, robot kolu manipülasyonu üzerinde çalışan ekip arkadaşımız ve sistemin bakımını/geliştirmesini sürdürecek araştırmacılardır.
 
 ---
 
@@ -12,10 +12,10 @@ Bu belge; AgileX LIMO mobil robotu ve üzerine entegre Elephant Robotics myCobot
 2. **Lidar ICP Kırılganlığı:** Lidar ICP, simetrik ortamlarda (koridor, düz duvarlar) açısal veya boyuna kaymalara açıktır; ayrıca kavranacak nesne lidar görüşünde yer aldığında harita ile uyuşmazlık yaratarak ince düzeltmeyi bozabilmektedir.
 
 **Alınan Kesin Mimari Karar:**
-- **Lidar Odometrisi / ICP Kaldırıldı:** Lidar ICP ve lidar odometrisi mimariden tamamen çıkarılmıştır. Lidar (`/scan`), yalnızca maliyet haritaları (costmap), güvenlik konisi durdurması ve Nav2 global/local engel tespiti için kullanılır.
+- **Lidar Odometrisi / ICP Kaldırıldı:** Lidar ICP ve lidar odometrisi mimariden tamamen çıkarılmıştır. Lidar (`/scan`), yalnızca maliyet haritaları (costmap), güvenlik konisi durdurması, dinamik engel takibi ve Nav2 global/local engel tespiti için kullanılır.
 - **Odometri Kaynağı:** Taban odometrisi (`/odom`), Görsel Odometri (VO) + tekerlek enkoderi + IMU füzyonundan gelir (ekip arkadaşımızın sorumluluğundadır).
 - **Küresel Lokalizasyon (`map -> odom`):** Harita ile odometri arasındaki dönüşüm küresel lokalizasyon katmanından gelir (simülasyonda AMCL bir yer tutucu/referanstır; gerçekte görsel SLAM / harita tabanlı lokalizasyon olacaktır).
-- **Göreceli Kapalı Çevrim Son Yaklaşma:** Kavrama hassasiyeti, küresel harita koordinatlarından değil; nesnenin robot gövdesine göre doğrudan kamera/algı ile ölçüldüğü kapalı çevrim son yaklaşma denetleyicisinden ([`SonYaklasma`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/son_yaklasma.py#L177)) elde edilir. Böylece küresel haritadaki AMCL kayması veya odometrideki uzun vadeli sürüklenme kavrama başarısını etkilemez.
+- **Göreceli Kapalı Çevrim Son Yaklaşma:** Kavrama hassasiyeti, küresel harita koordinatlarından değil; nesnenin robot gövdesine göre doğrudan kamera/algı ile ölçüldüğü kapalı çevrim son yaklaşma denetleyicisinden ([`SonYaklasma`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/son_yaklasma.py#L184)) elde edilir. Böylece küresel haritadaki AMCL kayması veya odometrideki uzun vadeli sürüklenme kavrama başarısını etkilemez.
 
 Koordinat dönüşüm zinciri şu şekilde bağlanır:
 $$T_{\text{map}}^{\text{nesne}} \xrightarrow[\text{kaba}]{} Q(\theta) \xrightarrow[\text{Nav2}]{} \text{Robot}_Q \xrightarrow[\text{Kamera: } T_{\text{base}}^{\text{nesne}}]{} \text{Kapalı Çevrim } P(\theta) \xrightarrow[\text{hassas}]{} \text{Kavrama}$$
@@ -27,7 +27,7 @@ Sistem; en üstte görev karar katmanından başlayarak donanım motor sürücü
 ```mermaid
 flowchart TD
     subgraph Karar Katmanı
-        GOREV["Görev Yöneticisi<br/>(GorevYoneticisi / GorevDugumu)"]
+        GOREV["Görev Yöneticisi & Düğümü<br/>(GorevYoneticisi / GorevDugumu)"]
     end
 
     subgraph Kavrama Durum Makinesi
@@ -49,24 +49,28 @@ flowchart TD
         SON_YAK["Kapalı Çevrim Son Yaklaşma<br/>(SonYaklasma: Astolfi + Son Bant)"]
     end
 
-    subgraph Güvenlik ve Hız Katmanı
+    subgraph Güvenlik ve Hız Zinciri
         VEL_SMOOTH["Velocity Smoother<br/>(/cmd_vel_smoothed)"]
-        COL_MON["Collision Monitor<br/>(/cmd_vel_smoothed -> /cmd_vel)"]
+        KALKAN["Hareketli Kalkan (İsteğe Bağlı)<br/>(hareketli_kalkan.py -> /cmd_vel_kalkan)"]
+        COL_MON["Collision Monitor<br/>(DurBolge / YavasBolge / FootprintApproach)"]
         BASE["LIMO Taban Sürücüsü<br/>(/cmd_vel)"]
     end
 
     subgraph Dış Arayüzler ve Sensörler
         VO["VO + Tekerlek + IMU<br/>(/odom ve odom->base_footprint)"]
-        ALGI["Kamera / Algı Ekibi<br/>(/kavrama/nesne_algi)"]
+        ALGI["Kamera Algı Modülü<br/>(renk_algi.py veya sahte_algi)"]
         KOL["Robot Kolu Ekibi<br/>(/kol/kavra, /kol/birak)"]
         LIDAR["2B Lidar + D435 Derinlik<br/>(/scan, /camera/depth/points)"]
         MAP_TF["Lokalizasyon Katmanı<br/>(TF: map->odom)"]
+        PIL_SENS["Pil Algılama Arayüzü<br/>(/limo_status veya /gorev/sahte_pil)"]
     end
 
     %% Karar ve Eylem Geçişleri
     GOREV -->|"Eylem: /kavra (Kavra.action)<br/>veya Konu: /kavrama/hedef"| KAV_SM
     KAV_SM -.->|"Geri Bildirim / Sonuç<br/>veya /kavrama/durum"| GOREV
     GOREV -->|"/kol/kavra, /kol/birak (Trigger)"| KOL
+    GOREV -->|"Şarj / Taşıma Hedefleri (NavigateToPose)"| NAV2
+    PIL_SENS -->|"/limo_status veya /gorev/sahte_pil"| GOREV
     KAV_SM --> YAK_BUL
     YAK_BUL -->|"[Q, P] Aday Pozları"| KAV_SM
     KAV_SM -->|"NAV_Q Hedefi"| NAV2
@@ -82,20 +86,78 @@ flowchart TD
     LIDAR -->|"/scan (Güvenlik Konisi)"| KAV_GORSEL
     KAV_GORSEL -->|"/kavrama/isaretler (MarkerArray)"| RVIZ
 
-    %% Hız ve Güvenlik Zinciri
-    VEL_SMOOTH --> COL_MON
-    COL_MON --> BASE
+    %% Hız ve Güvenlik Zinciri Akışı
+    VEL_SMOOTH -->|"/cmd_vel_smoothed"| KALKAN
+    KALKAN -->|"/cmd_vel_kalkan"| COL_MON
+    COL_MON -->|"/cmd_vel"| BASE
 
     %% Girdi Akışları
     VO -->|"/odom"| KAV_SM
     VO -->|"/odom"| SON_YAK
+    VO -->|"/odom"| KALKAN
     ALGI -->|"/kavrama/nesne_algi"| KAV_SM
     LIDAR -->|"/scan (Güvenlik Konisi)"| KAV_SM
+    LIDAR -->|"/scan (İz Takibi)"| KALKAN
     LIDAR -->|"/scan, /camera/depth/points"| COL_MON
     LIDAR -->|"/scan, VoxelLayer"| NAV2
     MAP_TF -->|"TF: map->odom"| KAV_SM
     KAV_SM -->|"/kavrama/nesne_robotta"| KOL
 ```
+
+### 1.3. Hız Zinciri ve Güvenlik (Velocity Smoother, Hareketli Kalkan ve Collision Monitor)
+
+Robotun hareket güvenliği, planlayıcıların ürettiği hız komutlarının kademeli olarak filtrelendiği çok katmanlı bir hız zinciri ile sağlanır:
+
+```
+[Nav2 Controller Server / Son Yaklaşma Denetleyicisi]
+                 │  cmd_vel_nav (veya cmd_vel)
+                 ▼
+┌────────────────────────────────────────────────────────┐
+│  nav2_velocity_smoother (Hız Yumuşatıcı)               │
+│  - Doğrusal ivme sınırı: 1.0 m/s²                      │
+│  - Açısal ivme sınırı: 3.0 rad/s²                      │
+└────────────────────────────────────────────────────────┘
+                 │  cmd_vel_smoothed
+                 ▼
+┌────────────────────────────────────────────────────────┐
+│  hareketli_kalkan (Hareketli Engel Kalkanı, İsteğe     │  <-- hareketli_kalkan:=true iken
+│  Bağlı) ([`hareketli_kalkan.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/hareketli_kalkan.py))               │
+│  - Lidar kümeleme ve hız vektörü kestirimi             │
+│  - Bağıl hız (v_rel) ve analitik TTC hesabı            │
+│  - Durağan engelleri (kavrama hedefi) YOK SAYAR        │
+└────────────────────────────────────────────────────────┘
+                 │  cmd_vel_kalkan (kalkan açıkken) / cmd_vel_smoothed (kalkan kapalıyken)
+                 ▼
+┌────────────────────────────────────────────────────────┐
+│  nav2_collision_monitor (Çarpışma İzleyici)            │
+│  - DurBolge (Acil durma poligonu: tampon + 0.06 m)     │
+│  - YavasBolge (0.55 m çember: %40 hız kısıtlama)       │
+│  - FootprintApproach (Durağan yaklaşma zaman ufku)     │
+└────────────────────────────────────────────────────────┘
+                 │  cmd_vel
+                 ▼
+     [LIMO Taban Sürücüsü (limo_base / Gazebo)]
+```
+
+#### 1. Collision Monitor Yapılandırması ([`nav2_diff.yaml`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/param/nav2_diff.yaml#L396-L450))
+- **`DurBolge` (Stop):** Robot ayak izi etrafına $0.06\text{ m}$ güvenlik payı eklenmiş poligon: `points: [0.221, 0.17, 0.221, -0.17, -0.221, -0.17, -0.221, 0.17]`. İçine $\ge 3$ nokta girdiğinde robotu anında durdurur (`action_type: "stop"`).
+- **`YavasBolge` (Slowdown):** $0.55\text{ m}$ yarıçapında dairesel bölge (`type: "circle", radius: 0.55`). Engel girdiğinde hızı $\%40$'a düşürür (`slowdown_ratio: 0.4`).
+- **`FootprintApproach` (Approach):** Maliyet haritası ayak izini (`/local_costmap/published_footprint`) robot hız vektörüyle $1.2\text{ s}$ (`time_before_collision: 1.2`) simüle ederek çarpışma yörüngesindeki durağan engellerde hızı keser.
+- **Gözlem Kaynakları:** `scan` (2B Lidar, $0.15\text{--}2.0\text{ m}$) ve `depth` (`/camera/depth/points` 3B nokta bulutu, $0.05\text{ m}$ zemin kesimi).
+
+#### 2. Humble Collision Monitor'ın Kısıtı ve Hareketli Kalkanın Çözümü
+Standart Humble `collision_monitor` düğümü, çevredeki engelleri **durağan** varsayar; engellerin kendi hız vektörünü hesaba katamaz.
+- **Ölçülen Simülasyon Sorunu ([`dinamik_engel.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/scripts/dinamik_engel.py)):** Karşıdan $0.6\text{ m/s}$ sabit hızla gelen tepkisiz insan silindiri senaryosunda robot yavaşlamış ancak zamanında tam duramamış ve $-2.9\text{ cm}$ temas anında robot hızı $0.094\text{ m/s}$ olarak kaydedilmiştir (`robot_carpti` sınıfı).
+- **DurBolge'yi Büyütmeme Zorunluluğu:** `DurBolge` ön tamponunu öne doğru uzatmak, kavrama yaklaşmasını imkansız kılar; çünkü kavrama son yaklaşmasında kavranacak nesne tampona $\sim 6\text{ cm}$ kadar yaklaşmak zorundadır.
+- **Hareketli Kalkan ([`hareketli_kalkan.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/hareketli_kalkan.py)):**
+  - Launch argümanı: [`limo_nav2.launch.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/launch/limo_nav2.launch.py#L90) içinde `hareketli_kalkan:=true` ile hız zincirine dahil edilir.
+  - Lidar taramalarını kümeleyip (`kume_esik = 0.10 m`, `kume_min_nokta = 3`) `odom` çerçevesinde takip eder ([`IzTakipci`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/hareketli_kalkan.py#L263)).
+  - Duvar/mobilya kenarlarının robot hareketinden kaynaklı sahte hız üretmesini engellemek için yarıçapı `max_iz_yaricap = 0.35 m` üzerindeki büyük kümeler elenir.
+  - **Yalnızca Hareketli Tehditler:** Sadece hızı $|v_{\text{iz}}| \ge \text{min\_engel\_hizi}$ ($0.20\text{ m/s}$) ve görülme sayısı $\ge 3$ olan dinamik engeller tehdit sayılır. Masa, duvar ve kavranacak elma/kutu gibi durağan nesneler kalkanı **asla** tetiklemez!
+  - **Analitik TTC:** Bağıl hız $\mathbf{v}_{\text{rel}} = \mathbf{v}_{\text{iz}} - \mathbf{v}_{\text{robot}}$ ve bağıl konum $\mathbf{p}_{\text{rel}}$ ile $|\mathbf{p} + \mathbf{v} t| = r_{\text{toplam}}$ çarpışma süresi (TTC) analitik olarak çözülür ([`carpismaya_kalan_sure`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/hareketli_kalkan.py#L413)).
+  - $\text{TTC} < \text{ttc\_dur}$ ($1.5\text{ s}$) ise engele doğru olan ileri hız sıfırlanır (`karar = 'dur'`); ancak robotun engelden kaçabilmesi için geri gitme hızı ve açısal dönüş ($w_z$) kesinlikle kısıtlanmaz!
+  - $\text{TTC} < \text{ttc\_yavas}$ ($3.0\text{ s}$) ise doğrusal yavaşlatma uygulanır (`karar = 'yavas'`).
+  - Canlı durum `/hareketli_kalkan/durum` konusuna (ör. `DUR ttc=1.12s v=0.61`, `serbest`), izler `/hareketli_kalkan/izler` konusuna `MarkerArray` olarak yayınlanır.
 
 ---
 
@@ -107,62 +169,62 @@ Ekip çalışmasında modüllerin entegrasyonunu sağlamak için belirlenen kesi
 
 | Konu / Servis / Eylem Adı | Tip | Koordinat Çerçevesi | Hız / Frekans | Sağlayıcı / Yayıncı | Tüketici / Dinleyici | Açıklama ve Sözleşme Şartları |
 |---|---|---|---|---|---|---|
-| `/kavra` | `limo_interfaces/action/Kavra` | `nesne.header.frame_id` (tipik `map`) | Eylem (Action) | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L742) (Sunucu) | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L130) (İstemci) | Uçtan uca kavrama eylemi. Hedef: nesne, `yon_derece`, `algisiz_izinli`. Geri bildirim ($5\text{ Hz}$): durum, ayrıntı, aday no, kalan mesafe. Sonuç: başarılı, neden, `nesne_robotta`, hata metrikleri, süre. |
-| `/kavrama/hedef` | `geometry_msgs/PointStamped` | `map` | Olay güdümlü | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L183) / Kullanıcı | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L701) | Konu tabanlı hedef arayüzü (eylem alternatifi veya yedek mod). Nesne yüksekliği kol sınırında ($0.0 \le z \le 0.45\text{ m}$) olmalıdır. |
-| `/kavrama/nesne_algi` | `geometry_msgs/PointStamped` | Herhangi bir geçerli TF çerçevesi | $2\text{--}10\text{ Hz}$ | Algı Ekibi (Kamera/YOLO) / [`SahteAlgiDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/sahte_algi.py#L123) | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L702), [`KavramaGorsel`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_gorsel.py#L513) | Kameranın nesneye dair canlı 3B ölçümü. TF ile otomatik `odom` çerçevesine dönüştürülür. |
-| `/kavrama/durum` | `std_msgs/String` | - | Olay güdümlü / $1\text{ Hz}$ | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L694) | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L196), [`KavramaGorsel`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_gorsel.py#L512), [`KavramaBenchNode`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/scripts/kavrama_bench.py#L282) | `DURUM ayrıntı` formatında durum bildirimleri (`PLAN`, `NAV_Q`, `SON_YAKLASMA`, `HAZIR`, `KURTARMA`, `HATA`). |
-| `/kavrama/nesne_robotta` | `geometry_msgs/PointStamped` | `base_footprint` | Olay güdümlü (`HAZIR` anında) | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L695) | Kol Ekibi / [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L61) | Hedefe ulaşıldığında nesnenin gövdeye göre son doğrulanmış konumu ($x \approx 0.22\text{ m}, y \approx 0.0\text{ m}$). |
-| `/kavrama/plan` | `geometry_msgs/PoseArray` | `map` | Planlama anında | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L696) | [`KavramaGorsel`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_gorsel.py#L511), RViz | Seçilen en iyi adayın $[Q, P]$ pozlarını içerir. |
+| `/kavra` | `limo_interfaces/action/Kavra` | `nesne.header.frame_id` (tipik `map`) | Eylem (Action) | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L680) (Sunucu) | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L129) (İstemci) | Uçtan uca kavrama eylemi. Hedef: nesne, `yon_derece`, `algisiz_izinli`. Geri bildirim ($5\text{ Hz}$): durum, ayrıntı, aday no, kalan mesafe. Sonuç: başarılı, neden, `nesne_robotta`, hata metrikleri, süre. |
+| `/kavrama/hedef` | `geometry_msgs/PointStamped` | `map` | Olay güdümlü | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L207) / Kullanıcı | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L776) | Konu tabanlı hedef arayüzü (eylem alternatifi veya yedek mod). Nesne dikey yüksekliği kol sınırında ($0.0 \le z \le 0.45\text{ m}$) olmalıdır. |
+| `/kavrama/nesne_algi` | `geometry_msgs/PointStamped` | `camera_color_optical_frame` / TF | $5\text{ Hz}$ (algı varsa) | [`RenkAlgiDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/renk_algi.py#L630) / [`SahteAlgiDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/sahte_algi.py#L123) | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L777), [`KavramaGorsel`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_gorsel.py#L513) | Kameranın nesneye dair canlı 3B merkez ölçümü. TF ile otomatik `odom` çerçevesine dönüştürülür. Kenara yakınlık veya boyut uyuşmazlığında yayın kesilir. |
+| `/kavrama/nesne_algi_durum` | `std_msgs/String` | - | $1\text{ Hz}$ | [`RenkAlgiDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/renk_algi.py#L707) / [`SahteAlgiDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/sahte_algi.py#L155) | İzleme / Teşhis | Algı durumu: `GORUYOR`, `GORMUYOR` veya `KISMI` (nesne kadraj kenarına `kenar_payi_px` mesafesinde). |
+| `/kavrama/algi_goruntu` | `sensor_msgs/Image` | `camera_color_optical_frame` | $5\text{ Hz}$ (`hata_ayiklama:=true`) | [`RenkAlgiDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/renk_algi.py#L708) | RViz2 / Teşhis | Algı maskesi, tespit edilen merkez ve 3B koordinat bindirmelerini içeren görsel hata ayıklama görüntüsü. |
+| `/kavrama/durum` | `std_msgs/String` | - | Olay güdümlü / $1\text{ Hz}$ | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L769) | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L219), [`KavramaGorsel`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_gorsel.py#L512) | `DURUM ayrıntı` formatında durum bildirimleri (`PLAN`, `NAV_Q`, `SON_YAKLASMA`, `HAZIR`, `KURTARMA`, `HATA`). |
+| `/kavrama/nesne_robotta` | `geometry_msgs/PointStamped` | `base_footprint` | Olay güdümlü (`HAZIR` anında) | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L770) | Kol Ekibi / [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L61) | Hedefe ulaşıldığında nesnenin gövdeye göre son doğrulanmış konumu ($x \approx 0.22\text{ m}, y \approx 0.0\text{ m}$). |
+| `/kavrama/plan` | `geometry_msgs/PoseArray` | `map` | Planlama anında | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L771) | [`KavramaGorsel`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_gorsel.py#L511), RViz | Seçilen en iyi adayın $[Q, P]$ pozlarını içerir. |
 | `/kavrama/isaretler` | `visualization_msgs/MarkerArray` | `map` ve `base_footprint` | $5\text{ Hz}$ | [`KavramaGorsel`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_gorsel.py#L508) | RViz2 ([`kavrama.rviz`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/config/kavrama.rviz)) | Nesne silindiri, Q/P okları, yaklaşma koridoru, robot ayak izi, kavrama noktası küresi, durum metni ve güvenlik konisi işaretçileri. |
-| `/kavrama/iptal` | `std_msgs/Empty` | - | Olay güdümlü | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L184) / Kullanıcı | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L703) | Aktif kavrama yaklaşmasını acil durdurur ve durumu `HATA iptal` yapar. |
-| `/kol/kavra` | `std_srvs/Trigger` | - | İstemci-Sunucu | Kol Ekibi (Sunucu) | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L142) (İstemci) | Robot koluna kavrama yörüngesini başlatma emri verir. Başarı durumunda `success=True` döner. Zaman aşımı $30\text{ s}$. |
-| `/kol/birak` | `std_srvs/Trigger` | - | İstemci-Sunucu | Kol Ekibi (Sunucu) | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L147) (İstemci) | Robot koluna nesneyi bırakma emri verir. Başarı durumunda `success=True` döner. Zaman aşımı $30\text{ s}$. |
-| `/odom` | `nav_msgs/Odometry` | `odom` $\rightarrow$ `base_footprint` | $50\text{ Hz}$ | Görsel Odometri (VO) Ekibi | Nav2, Son Yaklaşma, Durum Makinesi | Robotun tekerlek+IMU+VO füzyonlu yerel poz ve hız kestirimi. |
-| `navigate_to_pose` | `nav2_msgs/action/NavigateToPose` | `map` | Eylem İstemcisi | Nav2 Yığını (Sunucu) | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L690), [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L154) | Q pozuna kaba seyrüsefer veya taşıma/eve dönüş hedeflerine gitmek için kullanılır. |
-| `/gorev/istek` | `std_msgs/String` | - | Olay güdümlü | Kullanıcı / Üst Sistem | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L188) | Görev emri (`elma`, `kutu`, `iptal`). |
-| `/gorev/durum` | `std_msgs/String` | - | Olay güdümlü / $1\text{ Hz}$ | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L185) | Kullanıcı / UI | Görev aşama bilgisi (`KAVRAMAYA_GIT`, `KOL_KAVRA`, `TASI`, `KOL_BIRAK`, `EVE_DON`, `TAMAM`, `BASARISIZ`). |
-| `/kavrama/nesne_algi_durum` | `std_msgs/String` | - | $1\text{ Hz}$ | [`SahteAlgiDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/sahte_algi.py#L155) | İzleme / Teşhis | Sahte algının nesneyi görüp görmediğini yayınlar (`GORUYOR` / `GORMUYOR`). |
+| `/kavrama/iptal` | `std_msgs/Empty` | - | Olay güdümlü | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L208) / Kullanıcı | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L778) | Aktif kavrama yaklaşmasını acil durdurur ve durumu `HATA iptal` yapar. |
+| `/kol/kavra` | `std_srvs/Trigger` | - | İstemci-Sunucu | Kol Ekibi (Sunucu) | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L258) (İstemci) | Robot koluna kavrama yörüngesini başlatma emri verir. Başarı durumunda `success=True` döner. Zaman aşımı $30\text{ s}$. |
+| `/kol/birak` | `std_srvs/Trigger` | - | İstemci-Sunucu | Kol Ekibi (Sunucu) | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L263) (İstemci) | Robot koluna nesneyi bırakma emri verir. Başarı durumunda `success=True` döner. Zaman aşımı $30\text{ s}$. |
+| `/odom` | `nav_msgs/Odometry` | `odom` $\rightarrow$ `base_footprint` | $50\text{ Hz}$ | Görsel Odometri (VO) Ekibi | Nav2, Son Yaklaşma, Durum Makinesi, Kalkan | Robotun tekerlek+IMU+VO füzyonlu yerel poz ve hız kestirimi. |
+| `navigate_to_pose` | `nav2_msgs/action/NavigateToPose` | `map` | Eylem İstemcisi | Nav2 Yığını (Sunucu) | [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L765), [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L284) | Q pozuna kaba seyrüsefer veya taşıma/şarj/eve dönüş hedeflerine gitmek için kullanılır. |
+| `/gorev/istek` | `std_msgs/String` | - | Olay güdümlü | Kullanıcı / Üst Sistem | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L212) | Görev emri (`elma`, `kutu`, `iptal`). |
+| `/gorev/durum` | `std_msgs/String` | - | Olay güdümlü / $1\text{ Hz}$ | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L209) | Kullanıcı / UI | Görev aşama ve pil özeti bilgisi (`DURUM BOSTA pil=11.20V`, `KAVRAMAYA_GIT`, `TASI`, `SARJA_GIT`, `TAMAM`, `HATA pil düşük`). |
+| `/limo_status` | `limo_msgs/msg/LimoStatus` | - | $10\text{ Hz}$ | LIMO Taban Sürücüsü | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L244) | Gerçek robot batarya gerilimi (`battery_voltage`). |
+| `/gorev/sahte_pil` | `std_msgs/msg/Float32` | - | Olay güdümlü | Test / Simülasyon Operatörü | [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L236) | `sahte_pil:=true` iken test için simüle edilmiş batarya gerilimi iletimi. |
+| `/hareketli_kalkan/durum` | `std_msgs/String` | - | Olay güdümlü | [`HareketliKalkan`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/hareketli_kalkan.py#L679) | İzleme / Teşhis | Dinamik kalkan kararı (`serbest`, `YAVAS ttc=...s v=...`, `DUR ttc=...s v=...`). |
+| `/hareketli_kalkan/izler` | `visualization_msgs/MarkerArray` | `odom` | $10\text{ Hz}$ | [`HareketliKalkan`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/hareketli_kalkan.py#L683) | RViz2 | Takip edilen hareketli engeller (kırmızı silindir) ve durağan nesneler (mavi silindir). |
 
-### 2.2. Algı Ekibi İçin Sözleşme Detayları (`/kavrama/nesne_algi`)
-- **Format:** `geometry_msgs/PointStamped` mesajıdır.
-- **Koordinat Çerçevesi (`frame_id`):** Kamera çerçevesi (`camera_color_optical_frame`), kamera gövdesi (`camera_link`) veya doğrudan robot tabanı (`base_footprint`) olabilir. Mesajın `header.stamp` zaman damgası geçerli olmalıdır; [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L419-L445) TF ağacını kullanarak noktayı otomatik olarak `odom` çerçevesine dönüştürür:
-  ```python
-  # kavrama_dugumu.py: Algılanan nesne TF ile odom çerçevesine çevrilir
-  t = self.tf.lookup_transform('odom', m.header.frame_id, rclpy.time.Time(), rclpy.duration.Duration(seconds=0.1))
-  ox, oy, _ = nokta_donustur_3d(trans, rot, (m.point.x, m.point.y, m.point.z))
-  self.son_algi_odom = (float(ox), float(oy))
-  self.yeni_algi_var = True
-  ```
-- **Yayın Frekansı:** $2\text{--}10\text{ Hz}$ arası önerilir (sahte algı $5\text{ Hz}$ yayınlar).
-- **Gürültü ve Kayıp Toleransı:** Denetleyici içindeki [`NesneTahmini`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/son_yaklasma.py#L118) filtresi üstel hareketli ortalama ($\alpha = 0.4$) kullanır ve $0.10\text{ m}$ üzerindeki sıçramaları arka arkaya 3 kez gelmedikçe aykırı değer olarak eler.
-- **Kör Nokta Toleransı (`olcumsuz_mesafe = 0.25 m`):** Robot nesneye $0.25\text{ m}$'den daha fazla yaklaştığında nesne kameranın görüş açısından çıkabilir. Denetleyici bu mesafenin altında ölçüm kesilse dahi hata üretmez; son kestirilen konumu odometri ile dondurarak hedefe kadar kör sürünmeyle yaklaşmayı başarıyla tamamlar.
+### 2.2. Algı Ekibi İçin Sözleşme Detayları (`/kavrama/nesne_algi`, `renk_algi.py`)
+- **Prototip ve Kamera Donanımı:** RealSense D435 renkli (`/camera/color/image_raw`, 1280x720) ve derinlik (`/camera/depth/image_raw`, 848x480) görüntüleri kullanılır. [`RenkAlgiDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/renk_algi.py#L630), kırmızı nesneler için çift aralıklı HSV filtreleme (`0..10` ve `170..180` kırmızı sarması) ve eliptik morfolojik açma ile gürültüleri eler (`min_alan_px = 150 px`).
+- **Koordinat Çerçevesi ve TF:** Algılanan nokta `camera_color_optical_frame` optik çerçevesindedir ($Z$ ileri, $X$ sağa, $Y$ aşağı). [`KavramaDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L1103-L1129) TF ağacını kullanarak noktayı otomatik olarak `odom` çerçevesine dönüştürür.
+- **Kenar Payı ve Kısmi Görünüm Koruması (`kenar_payi_px = 4 px`):**
+  - Kamera nesneye çok yaklaştığında nesne kadrajın dışına taşmaya başlar. Sınırlayıcı kutusu (`x, y, w, h`) görüntü kenarlarına `kenar_payi_px` ($4\text{ px}$) kadar yakın olan lekeler kısmi görünüm sayılır ([`kenara_yakin_mi`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/renk_algi.py#L187)).
+  - Kesik konturların geometrik ağırlık merkezi hatalı çıkacağı için bu durumda `/kavrama/nesne_algi` konusuna **kesinlikle ölçüm gönderilmez**; durum konusu `/kavrama/nesne_algi_durum` üzerinden `'KISMI'` yayınlanır.
+- **Boyut Denetimi Tutarlılık Filtresi (`boyut_denetimi = True`, `beklenen_yaricap_m = 0.035 m`):**
+  - İki aşamalı medyan derinlik izdüşümü ($7 \times 7$ pencere) ile nesne yüzey mesafesi $d$ alınır. Görünen piksel yarıçapından fiziksel yarıçap kestirilir:
+    $$r_{\text{kestirilen}} = \frac{r_{\text{px}} \cdot d}{f_x}$$
+  - [`boyut_uygun_mu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/renk_algi.py#L259) denetleyicisi, $r_{\text{kestirilen}}$ değerinin `beklenen_yaricap_m` ($0.035\text{ m}$) referansının $\pm \%60$ aralığında ($[0.014\text{ m}, 0.056\text{ m}]$) olduğunu doğrular. Yanlış renk eşleşmeleri veya arka plan lekeleri bu sayede elenir ve durum `'GORMUYOR'` kalır.
+- **Küre Yüzeyinden Merkeze İlerleme:** Derinlik kamerası kürenin ön yüzeyini ölçer. Küre merkezinin 3B konumu için görüş ışını boyunca nesne yarıçapı kadar ($0.035\text{ m}$) sahne derinliğine ilerlenir ([`isin_derinlik_3b`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/renk_algi.py#L365)).
 
 ### 2.3. Robot Kolu Ekibi İçin Sözleşme Detayları (`/kol/kavra`, `/kol/birak`)
 - **myCobot 280 Erişim Sınırları:** Kolun tabanı robot şasisinden $0.19\text{ m}$ yukarıda monte edilmiştir. Kinematik erişim aralığı gereği nesnenin harita/dünya $z$ yüksekliği $0.0\text{ m} \le z \le 0.45\text{ m}$ aralığında olmalıdır. Bu aralık dışındaki hedefler kavrama düğümü tarafından doğrudan reddedilir (`HATA erisilemez yukseklik`).
 - **Kavrama Noktası Geometrisi:** Robot taban merkezine (`base_footprint`) göre nesne konumu:
   $$x = d_{\text{kavrama}} = 0.22\text{ m}, \quad y = \text{yanal} = 0.0\text{ m}$$
   Robot kolu ekibi, uç işlevcisini bu referans noktasına göre kinematik yörüngeye sokmalıdır.
-- **Servis Protokolü:** [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L233-L280), kavrama tamamlandığında (`HAZIR`) `/kol/kavra` servisini tetikler:
-  ```python
-  # gorev_dugumu.py: Kol servisi istemcisi
-  self.cli_kol_kavra = self.create_client(Trigger, '/kol/kavra', callback_group=self._cb_group)
-  req = Trigger.Request()
-  fut = client.call_async(req)
-  ```
-  Servis yanıtı $30\text{ s}$ içinde dönmelidir. Servis başarısız olursa görev yöneticisi kavramayı 1 kez yeniden dener. Geliştirme sürecinde kol düğümü devrede değilken `kol_sahte:=true` argümanı verilirse servis $3\text{ saniye}$ bekleyip otomatik başarı döner.
+- **Servis Protokolü:** [`GorevDugumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L258), kavrama tamamlandığında (`HAZIR`) `/kol/kavra` servisini tetikler. Servis yanıtı $30\text{ s}$ içinde dönmelidir. Başarısızlıkta kavrama 1 kez yeniden denenir. Testlerde `kol_sahte:=true` argümanı verilirse servis otomatik başarı döner.
 
 ### 2.4. Görsel Odometri (VO) Ekibi İçin TF ve Kayma Beklentileri
 - **TF Ağacı:** VO ekibi `odom -> base_footprint` dönüşümünü ve `/odom` konusunu en az $50\text{ Hz}$ frekansında kesintisiz sağlamalıdır.
-- **Odometri Kaymasına Dayanıklılık:** Son yaklaşma algoritması nesneye göreli kapalı çevrim çalıştığı için odometri sürüklenmesine (drift) karşı tasarımsal olarak dayanıklıdır. `test_son_yaklasma.py` dosyasındaki test (c) senaryosunda doğrulandığı üzere; robotun tekerlek hareketi odometri komutunun $\%2$ fazlası olsa dahi:
-  $$\Delta x_{\text{gercek}} = (1 + \epsilon_v) v \Delta t$$
-  Her kontrol adımında kameradan gelen taze nesne konumuyla hedef $P$ odom çerçevesinde dinamik güncellenir. Kapalı çevrim geri besleme bu sapmayı yolda eritir ve hedef kavrama hatası $2\text{ cm}$'nin altında kalır.
-- **Kritik Kısıt:** Odometride ani pozisyon sıçramaları (jump) olmamalıdır. $0.15\text{ m}$'den büyük ani odometri sıçramaları güvenlik gereği `HATA:sapma` tetikler.
+- **Odometri Kaymasına Dayanıklılık:** Son yaklaşma algoritması nesneye göreli kapalı çevrim çalıştığı için odometri sürüklenmesine (drift) karşı tasarımsal olarak dayanıklıdır. Her kontrol adımında kameradan gelen taze nesne konumuyla hedef $P$ odom çerçevesinde dinamik güncellenir.
+- **Kritik Kısıt (Ani Sıçrama):** Odometride ani koordinat sıçramaları olmamalıdır. $0.15\text{ m}$'den büyük ani odometri sıçramaları güvenlik gereği `HATA:sapma` tetikler.
+- **Saf Odom (`localization:=yok`) Ölçümleri ve VO Ekibine Kesin Gereksinim:**
+  Harita düzeltmesinin (`map->odom`) bulunmadığı, sistemin tamamen taban odometrisine güvendiği saf odometri testlerinde ([`limo_sim_nav2.launch.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/launch/limo_sim_nav2.launch.py#L47) `localization:=yok`) elde edilen ölçüm sonuçları:
+  - **Tekerlek Odometrisi (teker profili):** $7/7$ hedef başarıyla tamamlanmış, toplam süre $124\text{ s}$, ortalama varış hatası $0.20\text{ m}$, asgari açıklık $0.17\text{ m}$ olarak ölçülmüştür.
+  - **Kötü Görsel Odometri (vio_kotu profili):** $6/7$ hedef tamamlanabilmiş; $0.27\text{ m}$ koridor açıklığına sahip `bati_dar` hedefinde kümülatif kayma nedeniyle robot duvara temas etmiş (asgari açıklık $0.0\text{ m}$), $18$ kez kurtarma manevrası yapmış ve zaman aşımına (`TIMEOUT`) uğramıştır. Bu senaryoda lokalizasyon kayması $0.31\text{--}0.44\text{ m}$ mertebesine çıkmıştır.
+  - **VO Ekibine Kesin Tasarım Kriteri:**
+    Robotun dar geçitlerden ($<0.30\text{ m}$) sıkışmadan geçebilmesi için kümülatif görsel odometri kayması **$< \sim 0.15\text{ m}$** sınırında tutulmalıdır; aksi takdirde harita referanslı `map->odom` düzeltmesi (yer tutucu AMCL veya Görsel SLAM) zorunludur (nitekim AMCL devredeyken `vio_kotu` dahi $7/7$ hedefe sorunsuz ulaşmaktadır).
 
 ---
 
 ## 3. Kavrama Akışı Ayrıntısı (Deep Dive)
 
-Kavrama süreci, statik haritada en uygun yaklaşma yönünün seçilmesinden başlayıp milimetrik sürünmeyle nesneye kilitlenmeye ve RViz görselleştirmesine kadar uzanan 5 ana aşamadan oluşur:
+Kavrama süreci, statik haritada en uygun yaklaşma yönünün seçilmesinden başlayıp milimetrik sürünmeyle nesneye kilitlenmeye ve RViz görselleştirmesine kadar uzanan ana aşamalardan oluşur:
 
 ### 3.1. Yaklaşma Seçimi ([`kavrama_yaklasim.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_yaklasim.py))
 Haritadaki nesne konumu $(n_x, n_y)$ verildiğinde robotun yanaşacağı poz çifti hesaplanır:
@@ -176,152 +238,140 @@ Haritadaki nesne konumu $(n_x, n_y)$ verildiğinde robotun yanaşacağı poz çi
 ```
 
 1. **Aday Açı Taraması:** $-180^\circ$ ile $+180^\circ$ arasında $\Delta \theta = 5^\circ$ adımlarla 72 aday taranır.
-2. **Q $\rightarrow$ P Boyunca Azalan Belirsizlik:** Q noktasında Nav2 ve küresel lokalizasyon belirsizliği yüksektir; bu nedenle ayak izine `pay + konum_belirsizligi` ($0.05 + 0.06 = 0.11\text{ m}$) güvenlik payı eklenir. Robot $Q$'dan $P$'ye ilerledikçe kapalı çevrim göreli sürüşe geçildiğinden belirsizlik payı doğrusal olarak azalarak $P$'de `pay_p + belirsizlik_p` ($0.03 + 0.015 = 0.045\text{ m}$) değerine düşer:
-   $$\text{pay}(t) = (1 - t) \cdot (\text{pay} + \text{konum\_belirsizligi}) + t \cdot (\text{pay\_p} + \text{belirsizlik\_p}), \quad t \in [0, 1]$$
-   Bu dinamik daralma, duvara $5\text{ cm}$ mesafedeki nesnelere dahi güvenli yaklaşma yolu bulunmasını sağlar.
-3. **Uyarlanabilir $d_{\text{on}}$:** Ön koridor mesafesi sabit değildir; $[d_{\text{on\_min}}=0.30\text{ m}, d_{\text{on\_max}}=0.60\text{ m}]$ aralığında $0.05\text{ m}$ adımlarla geriye doğru taranır. Koridoru ve Q ayak izini temiz tutan **en büyük** $d_{\text{on}}$ seçilir (uzun koridor kameranın nesneyi daha erken görmesini sağlar).
-4. **Yüzey Normali Uyumu ([`yuzey_normali_bul`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_yaklasim.py#L122)):** Nesnenin $0.30\text{ m}$ çevresindeki engellerden Temel Bileşenler Analizi (PCA / SVD) ile baskın kenar doğrultusu bulunur:
-   ```python
-   # kavrama_yaklasim.py: PCA ile duvar/kenar normali tespiti
-   C = noktalar.mean(axis=0)
-   X = noktalar - C
-   U, s, Vt = np.linalg.svd(X)
-   if s[0] >= 1.5 * s[1]:  # Belirgin kenar koşulu
-       v_norm = Vt[1]
-       if np.dot(v_norm, C - np.array([ox, oy])) < 0:
-           v_norm = -v_norm
-       th_yuzey = math.atan2(v_norm[1], v_norm[0])
-   ```
-   Aday açı, kenara dik ve odanın içine doğru olan doğrultuya ne kadar yakınsa puanına $1.0 \times \cos(\theta - \theta_{\text{yuzey}})$ eklenir.
+2. **Q $\rightarrow$ P Boyunca Azalan Belirsizlik:** Q noktasında Nav2 ve küresel lokalizasyon belirsizliği yüksektir; bu nedenle ayak izine `pay + konum_belirsizligi` ($0.05 + 0.06 = 0.11\text{ m}$) güvenlik payı eklenir. Robot $Q$'dan $P$'ye ilerledikçe kapalı çevrim göreli sürüşe geçildiğinden belirsizlik payı doğrusal olarak azalarak $P$'de `pay_p + belirsizlik_p` ($0.03 + 0.015 = 0.045\text{ m}$) değerine düşer.
+3. **Uyarlanabilir $d_{\text{on}}$:** Ön koridor mesafesi sabit değildir; $[d_{\text{on\_min}}=0.30\text{ m}, d_{\text{on\_max}}=0.60\text{ m}]$ aralığında $0.05\text{ m}$ adımlarla geriye doğru taranır. Koridoru ve Q ayak izini temiz tutan **en büyük** $d_{\text{on}}$ seçilir.
+4. **Yüzey Normali Uyumu ([`yuzey_normali_bul`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_yaklasim.py#L122)):** Nesnenin $0.30\text{ m}$ çevresindeki engellerden Temel Bileşenler Analizi (PCA / SVD) ile baskın kenar doğrultusu bulunur ve dik açıya puan önceliği verilir.
 5. **Açı Ayrıklığı (NMS):** Birbirine $20^\circ$'den daha yakın adaylar elenir; puana göre sıralanmış en iyi 3 aday saklanır.
-6. **Hata Teşhisi ([`yaklasim_tani`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_yaklasim.py#L309)):** Hiçbir aday geçerli bulunamazsa elenme nedenleri istatistik olarak raporlanır (`P_carpisma`, `koridor`, `Q_carpisma`, `erisim`, `yuzey`, `yon`).
 
 ### 3.2. Eylem ve Görev Katmanı ([`limo_interfaces/action/Kavra.action`](file:///home/gunes/limo_robot/limo_ws/src/limo_interfaces/action/Kavra.action))
 Kavrama düğümü hem ROS 2 Action Server (`/kavra`) hem de klasik konu arayüzünü (`/kavrama/hedef`, `/kavrama/durum`, `/kavrama/iptal`) eşzamanlı destekler:
 - **Eylem Hedefi:** `PointStamped nesne`, `float32 yon_derece` (NaN=serbest), `bool algisiz_izinli`.
 - **Eylem Geri Bildirimi ($5\text{ Hz}$):** `string durum` (`PLAN`, `NAV_Q`, `SON_YAKLASMA`, `KURTARMA`), `string ayrinti`, `int32 aday_no`, `int32 aday_sayisi`, `float32 kalan_mesafe_m`.
 - **Eylem Sonucu:** `bool basarili`, `string neden` (`HAZIR` veya `HATA ...`), `PointStamped nesne_robotta`, `float32 tahmini_hata_cm`, `float32 tahmini_yon_hatasi_derece`, `float32 sure_s`.
-- **Görev Düğümü Uyarlanabilir Arayüzü ([`kavrama_arayuzu_sec`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L71-L97)):** `gorev_dugumu`, `kavrama_arayuzu: 'auto'` (varsayılan) parametresiyle başlar. Eğer `/kavra` eylem sunucusu $5\text{ s}$ içinde hazır olursa doğrudan eylem üzerinden bağlanır; paket veya sunucu yoksa otomatik olarak konu tabanlı arayüze düşer (fallback).
+- **Görev Düğümü Uyarlanabilir Arayüzü ([`kavrama_arayuzu_sec`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py#L83)):** `gorev_dugumu`, `kavrama_arayuzu: 'auto'` (varsayılan) parametresiyle başlar. Eğer `/kavra` eylem sunucusu $5\text{ s}$ içinde hazır olursa doğrudan eylem üzerinden bağlanır; paket veya sunucu yoksa otomatik olarak konu tabanlı arayüze düşer (fallback).
 
-### 3.3. NAV_Q Aşaması (Nav2 ile Kaba Yaklaşma)
+### 3.3. NAV_Q Aşaması (Nav2 ile Kaba Yaklaşma, Erken Kabul ve Zaman Aşımı)
 Seçilen adayın $Q$ pozuna Nav2 `navigate_to_pose` eylemi başlatılır:
-- **Davranış Ağacı ([`navigate_to_pose_hassas.xml`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/behavior_trees/navigate_to_pose_hassas.xml)):** Nesnenin yakınında robot kolunun etraftaki mobilyalara çarpmasını önlemek amacıyla standart Nav2 kurtarma ağacındaki `Spin` davranışı tamamen kaldırılmış, yalnızca $0.15\text{ m}$ `BackUp` bırakılmıştır:
-  ```xml
-  <RecoveryNode number_of_retries="6" name="NavigateRecovery">
-    <PipelineSequence name="NavigateWithReplanning">
-      <RateController hz="1.0">
-        <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
-      </RateController>
-      <FollowPath path="{path}" controller_id="FollowPath" goal_checker_id="hassas_hedef"/>
-    </PipelineSequence>
-    <ReactiveFallback name="RecoveryFallback">
-      <GoalUpdated/>
-      <RoundRobin name="RecoveryActions">
-        <ClearEntireCostmap name="ClearLocalCostmap" service_name="local_costmap/clear_entirely_local_costmap"/>
-        <Wait wait_duration="5"/>
-        <BackUp backup_dist="0.15" backup_speed="0.05"/>
-      </RoundRobin>
-    </ReactiveFallback>
-  </RecoveryNode>
-  ```
-- **Hassas Hedef Denetleyicisi ([`hassas_hedef`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/param/nav2_diff.yaml#L148-L153)):** Nav2 `controller_server` içinde `xy_goal_tolerance: 0.15 m` ve `yaw_goal_tolerance: 0.25 rad` ($\approx 14.3^\circ$) toleranslarıyla tanımlanmıştır.
-- **Yakın Kabul Mekanizması ([`q_yakin_mi`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L192-L224)):** MPPI yerel planlayıcısı dar alanlarda sıkışıp hedefi tamamlayamasa veya eylem sunucusu `ABORTED` (durum 6) verse bile, robotun harita pozu $Q$'ya göre $d \le 0.35\text{ m}$ ve $|\Delta \theta| \le 35^\circ$ içindeyse hedef reddedilmez; durum makinesi bunu `NAV_Q yakin_kabul` olarak değerlendirip doğrudan `SON_YAKLASMA` fazına geçer:
-  ```python
-  # kavrama_dugumu.py: q_yakin_mi tolerans kontrolü
-  yakin, d, a = q_yakin_mi((rx, ry, ryaw), (qx, qy, th), self.q_kabul_xy, self.q_kabul_yaw)
-  if yakin:
-      self.durum(f'NAV_Q yakin_kabul ({d * 100:.1f} cm, {math.degrees(a):.1f}°)')
-      self._son_yaklasma_baslat()
-  ```
+- **Davranış Ağacı ([`navigate_to_pose_hassas.xml`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/behavior_trees/navigate_to_pose_hassas.xml)):** Nesne yakınında robot kolunun etraftaki mobilyalara çarpmasını önlemek amacıyla standart Nav2 `Spin` davranışı tamamen kaldırılmış, yalnızca $0.15\text{ m}$ `BackUp` bırakılmıştır.
+- **Hassas Hedef Denetleyicisi ([`hassas_hedef`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/param/nav2_diff.yaml#L148)):** Nav2 `controller_server` içinde `xy_goal_tolerance: 0.15 m` ve `yaw_goal_tolerance: 0.25 rad` ($\approx 14.3^\circ$) toleranslarıyla tanımlanmıştır.
+- **Erken Kabul Mekanizması ([`erken_kabul_durumu`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L265)):**
+  - MPPI kontrolcüsünün dar alanlarda hedef etrafında ince salınım yaparak `SUCCEEDED` vermesini gereksiz yere beklememek için erken kabul devrededir.
+  - Robotun harita pozu $Q$'ya göre `q_erken_xy` ($0.20\text{ m}$) ve `q_erken_yaw` ($20.0^\circ$ / $0.35\text{ rad}$) toleransları içinde kesintisiz olarak `q_erken_sure` ($1.0\text{ s}$) boyunca kalırsa, Nav2 hedefi iptal edilir ve doğrudan `SON_YAKLASMA` fazına geçilir (`NAV_Q erken_kabul (.. cm, ..°)`).
+  - Gece benchmark testlerinde (g6 koşusu) `NAV_Q erken_kabul (18.4 cm, 4.2°)` başarıyla tetiklenmiş ve seyrüsefer gecikmesiz son yaklaşmaya devredilmiştir.
+- **NAV_Q Zaman Aşımı (`nav_q_zaman_asimi = 90.0 s`):**
+  - Seyrüsefer $90\text{ s}$ içinde tamamlanamazsa:
+    - Robot o an $Q$'ya yakın kabul sınırları (`q_kabul_xy = 0.35 m`, `q_kabul_yaw = 35.0^\circ`) içindeyse `NAV_Q yakin_kabul` ile doğrudan `SON_YAKLASMA`ya geçilir.
+    - Sınırların dışındaysa aday başarısız sayılır (`NAV_Q zaman aşımı (90 s)`) ve durum makinesi sonraki adaya geçer (`SONRAKI_ADAY`).
+- **Canlı Eylem Geri Bildirimi:** NAV_Q sırasında robot ile $Q$ arasındaki kalan Öklid mesafesi $5\text{ Hz}$ hızında `/kavra` eylem geri bildiriminde `kalan_mesafe_m = d` olarak yayınlanır.
+- **Tek Geçiş Koruması ([`nav_q_durum_gecisi`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L309)):** Zaman aşımı, Nav2 sonucu ve erken kabul yarış durumlarına karşı çıkış atomik `GECIS` durumuyla kilitlenir.
 
-### 3.4. SON_YAKLASMA Aşaması (Kapalı Çevrim Denetleyici)
-Robot $Q$'ya vardığında kontrol $50\text{ Hz}$ frekansında çalışan [`SonYaklasma`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/son_yaklasma.py#L177) sınıfına devredilir:
+### 3.4. SON_YAKLASMA Aşaması (Kapalı Çevrim Denetleyici, Kör Nokta ve Tahmin Dondurma)
+Robot $Q$'ya vardığında kontrol $50\text{ Hz}$ frekansında çalışan [`SonYaklasma`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/son_yaklasma.py#L184) sınıfına devredilir:
 1. **Astolfi Kutupsal Durum Geribeslemesi (Bant Dışı, $\rho \ge 0.03\text{ m}$):**
-   Hedef hatası kutupsal koordinatlara çevrilir:
    $$\rho = \sqrt{\Delta x^2 + \Delta y^2}, \quad \alpha = \text{wrap}(\text{atan2}(\Delta y, \Delta x) - \theta_{\text{robot}}), \quad \beta = \text{wrap}(\theta_{\text{hedef}} - \text{atan2}(\Delta y, \Delta x))$$
-   Hız kontrol yasası:
-   $$v = k_\rho \cdot \rho, \quad \omega = k_\alpha \cdot \alpha + k_\beta \cdot \beta$$
-   Asimptotik kararlılık koşulları: $k_\rho > 0$, $k_\beta < 0$, $k_\alpha - k_\rho > 0$.
-   Yapılandırma kazançları: $k_\rho = 0.6$, $k_\alpha = 1.8$, $k_\beta = -0.5$ ($k_\alpha - k_\rho = 1.2 > 0$).
+   $$v = k_\rho \cdot \rho, \quad \omega = k_\alpha \cdot \alpha + k_\beta \cdot \beta \quad (k_\rho = 0.6, k_\alpha = 1.8, k_\beta = -0.5)$$
 2. **Görüş Koruma Kısıtı (Field-of-View Guard):**
-   D435 kameranın yatay görüş yarı açısı $35^\circ$, emniyet payı $10^\circ$ olduğundan sınır kerteriz $b_{\text{sinir}} = 25^\circ$'dir. Robot dönerken nesneyi kamera açısından kaçırmamak için açısal hız $\omega$ kerterizi azaltacak yönde sınırlandırılır, doğrusal hız $v$ ise sınır açıya yaklaşıldıkça $v_{\text{min}} = 0.015\text{ m/s}$ seviyesine kadar düşürülür:
-   ```python
-   # son_yaklasma.py: Görüş koruma mantığı
-   th_nesne = math.atan2(oy - ry, ox - rx)
-   b = wrap(th_nesne - ryaw)
-   b_sinir = max(1e-3, self.ayar.gorus_yari_aci - self.ayar.gorus_payi)  # 25 derece
-   oran_b = min(1.0, abs(b) / b_sinir)
-   v_maks_b = self.ayar.v_min + (1.0 - oran_b) * (self.ayar.v_max - self.ayar.v_min)
-   v_hedef = min(v_maks_b, max(self.ayar.v_min, v_ham))
-   ```
-3. **Son Bant Mantığı (Aşama A ve Aşama B, $\rho < 0.03\text{ m}$):**
-   Mesafe $3\text{ cm}$ altına indiğinde Astolfi denetleyicisi kutupsal tekillik nedeniyle devreden çıkar ve Kartezyen hizalama devreye girer:
-   - **Aşama A (Hizala):** Eğer $|\Delta \theta| > 2.0^\circ$ ise robot durur ($v=0$) ve yerinde dönerek açısını hedefe kilitler ($\omega = k_{\text{yaw}} \cdot e_{\text{yaw}}$, $|w| \ge 0.05\text{ rad/s}$).
-   - **Aşama B (Sürün):** Açı kilitlendikten sonra robot $v_{\text{surunme}} = 0.03\text{ m/s}$ ($3\text{ cm/s}$) hızla düz ileri/geri sürünerek boyuna hatayı kapatır ($e_{\text{ileri}} < 0.01\text{ m}$).
-   - **Yanal Hata Eşiği:** Son bantta yanal hata $|e_{\text{yanal}}| \ge 0.03\text{ m}$ olursa robot diferansiyel olduğu için yanal düzeltme yapamaz; görevi zorlamak yerine `HATA:yanal` üretip kurtarma moduna geçer.
-4. **Lidar Ön Güvenlik Konisi:**
-   [`guvenlik_mesafesi`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L74) fonksiyonu, `/scan` noktalarını robot tamponuna göre inceler. Ön $\pm 25^\circ$ koni içinde, kavranacak nesnenin $0.08\text{ m}$ yarıçapı hariç tutularak tampona (LIMO için $0.161\text{ m}$) $0.05\text{ m}$'den daha yakın beklenmedik bir engel girerse motorlar derhal kilitlenir (`HATA:engel`).
+   D435 kameranın yatay görüş yarı açısı $35^\circ$, emniyet payı $10^\circ$ olduğundan sınır kerteriz $b_{\text{sinir}} = 25^\circ$'dir. Kerteriz açısı büyüdükçe doğrusal hız $v_{\text{min}} = 0.015\text{ m/s}$ seviyesine kadar düşürülür.
+3. **Kör Nokta ve Tahmin Dondurma Mekanizması (`tahmin_donduruldu`, `olcumsuz_mesafe = 0.25 m`):**
+   - **Sorunun Nedeni (Simülasyon Ölçümü):** Robot nesneye $0.25\text{ m}$'den daha fazla yaklaştığında nesne (özellikle elma) kameranın görüş açısından kısmen çıkar. Simülasyon testlerinde kısmi görünen elmanın ağırlık merkezi kayarak kameranın $49\text{ cm}$ hatalı ölçüm üretmesine ve bu sıçramanın hatalı `HATA:sapma` tetiklemesine neden olduğu tespit edilmiştir.
+   - **Tahmin Dondurma Çözümü:** Robot-hedef mesafesi $\rho < \text{olcumsuz\_mesafe}$ ($0.25\text{ m}$) altına indiği anda `self._tahmin_donduruldu = True` yapılır. Bu andan sonra kameradan yeni ölçüm gelse dahi nesne tahmini dondurulur ve güncellenmez. Robot, son doğrulanmış konuma odometri entegrasyonuyla kör sürünerek güvenle yaklaşır.
+   - **Aykırı Değer Filtresi (`aykiri_kabul_sayisi = 3`):** Tahmin dondurulmadan önce $0.10\text{ m}$ üzerindeki sıçramalar arka arkaya en az 3 kez gelmedikçe aykırı değer olarak reddedilir ([`NesneTahmini`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/son_yaklasma.py#L119)).
+4. **Son Bant Mantığı (Aşama A ve Aşama B, $\rho < 0.03\text{ m}$):**
+   - **Aşama A (Hizala):** $|\Delta \theta| > 2.0^\circ$ ise robot durur ($v=0$) ve yerinde dönerek açısını hedefe kilitler ($\omega = k_{\text{yaw}} \cdot e_{\text{yaw}}$).
+   - **Aşama B (Sürün):** Açı kilitlendikten sonra robot $v_{\text{surunme}} = 0.03\text{ m/s}$ ($3\text{ cm/s}$) hızla düz sürünerek boyuna hatayı kapatır ($e_{\text{ileri}} < 0.01\text{ m}$).
+   - **Yanal Hata Eşiği:** Son bantta yanal hata $|e_{\text{yanal}}| \ge 0.03\text{ m}$ olursa robot diferansiyel olduğu için zorlamaz; `HATA:yanal` üretip kurtarma moduna geçer.
+5. **Lidar Ön Güvenlik Konisi:**
+   [`guvenlik_mesafesi`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L89) fonksiyonu, ön $\pm 25^\circ$ koni içinde kavranacak nesnenin $0.08\text{ m}$ yarıçapı hariç tutularak tampona ($0.161\text{ m}$) $0.05\text{ m}$'den daha yakın beklenmedik bir engel girdiğinde motorları derhal kilitler (`HATA:engel`).
 
 ### 3.5. RViz Görselleştirme Katmanı ([`kavrama_gorsel.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_gorsel.py))
-Operatörün ve araştırmacıların yaklaşma sürecini RViz'de canlı takip edebilmesi için [`KavramaGorsel`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_gorsel.py#L475) düğümü `/kavrama/isaretler` konusuna $5\text{ Hz}$ frekansta işaretçi dizisi (`visualization_msgs/MarkerArray`) yayınlar:
-1. `nesne` (Silindir, $r=0.03\text{ m}$, $h=0.08\text{ m}$): Taze algı varsa yeşil, hedef konumuysa turuncu.
-2. `Q` (Mavi ok) ve `P` (Yeşil ok): Planlanan yaklaşma öncesi ve kavrama pozları.
-3. `koridor` (Yarı saydam mavi şerit): $Q$ ve $P$ arasındaki $0.32\text{ m}$ genişliğindeki ayak izi güvenlik koridoru.
-4. `ayak_izi_P` (Sarımsı yeşil çizgiler): $P$ kavrama anında robotun kaplayacağı $\pm 0.161 \times \pm 0.110\text{ m}$ ayak izi poligonu.
-5. `kavrama_noktasi` (Mor/Eflatun küre): Robotun $0.22\text{ m}$ önündeki manipülatör kavrama merkezi.
-6. `durum` (3B Metin, `base_footprint` $z=0.50\text{ m}$): Robotun üstünde canlı durum (`HATA` kırmızı, `HAZIR` yeşil, ara durumlar sarı).
-7. `guvenlik_konisi` (Çizgisel koni): `SON_YAKLASMA` sırasında robotun önünde $\pm 25^\circ$, $0.50\text{ m}$ koni (engel varsa kırmızı, yoksa kehribar).
-8. **Temizleme (DELETEALL):** Durum makinesi `PLAN` durumuna geçtiğinde önceki hedeften kalan tüm işaretçiler otomatik silinir.
+Operatörün ve araştırmacıların yaklaşma sürecini RViz'de canlı takip edebilmesi için [`KavramaGorsel`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_gorsel.py#L475) düğümü `/kavrama/isaretler` konusuna $5\text{ Hz}$ frekansta işaretçi dizisi (`visualization_msgs/MarkerArray`) yayınlar: `nesne` (silindir), `Q` (mavi ok), `P` (yeşil ok), `koridor` (mavi şerit), `ayak_izi_P` (sarımsı poligon), `kavrama_noktasi` (mor küre), `durum` (3B metin), `guvenlik_konisi` (çizgisel koni).
 
 ### 3.6. KURTARMA ve Durum Geçiş Koruması
 Son yaklaşma herhangi bir nedenle başarısız olursa (`HATA:yanal`, `HATA:engel`, `HATA:zaman_asimi`):
 1. **Geri Çekilme:** Robot odometri referansıyla düz $0.20\text{ m}$ geri çekilir ($v = -0.08\text{ m/s}$).
-2. **Durum Geçiş Koruması ([`kurtarma_durum_gecisi`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L242-L263)):** $50\text{ Hz}$ döngüde kurtarma tamamlandığında sayaçların iki kez artmasını ve aday atlanmasını önlemek için durum atomik olarak `GECIS` ara durumuna alınır.
-3. **Sonraki Aday:** Robot geri çekildikten sonra listedeki bir sonraki aday ($2/3$ veya $3/3$) ile `NAV_Q` fazı yeniden başlatılır. En fazla 2 kurtarma denemesi yapılır; tüm adaylar tükenirse `HATA tüm adaylar denendi` verilir.
+2. **Durum Geçiş Koruması ([`kurtarma_durum_gecisi`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_dugumu.py#L242)):** $50\text{ Hz}$ döngüde mesafe tamamlandığında durum atomik olarak `GECIS` ara durumuna alınır; böylece sayaçların iki kez artması ve aday atlanması önlenir.
+3. **Sonraki Aday:** Robot en fazla 2 kurtarma dener; tüm adaylar tükenirse `HATA tüm adaylar denendi` verilir.
 
 ### 3.7. HATA Türleri ve Anlamları
-- `HATA erisilemez yukseklik z=...`: Nesne yüksekliği kolun erişebileceği $[0.0, 0.45]\text{ m}$ sınırlarının dışındadır (örn. masa üstü $z=0.75\text{ m}$).
+- `HATA erisilemez yukseklik z=...`: Nesne yüksekliği kolun erişebileceği $[0.0, 0.45]\text{ m}$ sınırlarının dışındadır.
 - `HATA geçerli yaklaşma yok (engel / erişim)`: Statik haritada hiçbir aday açı koridor veya ayak izi şartını sağlayamamıştır.
 - `HATA tüm adaylar denendi`: Mevcut 3 yaklaşma adayı ve kurtarma hakları tükenmiştir.
-- `HATA iptal`: `/kavrama/iptal` konusundan kullanıcı/görev iptal sinyali gelmiştir.
+- `HATA iptal`: Kullanıcıdan veya üst görev yöneticisinden iptal sinyali gelmiştir.
 - `HATA:zaman_asimi`: $0.25\text{ m}$'den uzakta $1.0\text{ saniye}$ boyunca kamera ölçümü gelmemiştir veya toplam son yaklaşma süresi $40\text{ s}$ sınırını aşmıştır.
-- `HATA:sapma`: Algılanan nesne konumunda veya hesaplanan hedefte $0.15\text{ m}$'den büyük ani bir sıçrama tespit edilmiştir.
+- `HATA:sapma`: Algılanan nesne konumunda veya hedefte $0.15\text{ m}$'den büyük ani bir sıçrama tespit edilmiştir.
 - `HATA:yanal`: Son bantta yanal eksen hatası kabul edilemez eşik olan $0.03\text{ m}$'yi aşmıştır.
 - `HATA:engel`: Robotun ön güvenlik konisi içine nesne harici bir engel girmiştir ($<5\text{ cm}$).
+
+### 3.8. Pil ve Şarj Görev Davranışı ([`gorev_yoneticisi.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_yoneticisi.py), [`gorev_dugumu.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_dugumu.py))
+Robotun otonom operasyonlar sırasında pilinin tükenerek yolda kalmasını önlemek amacıyla batarya farkındalığı durum makinesine entegre edilmiştir:
+- **Pil Koruma Eşikleri ([`PilAyari`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/gorev_yoneticisi.py#L87)):**
+  - `uyari_v`: $11.0\text{ V}$ (Düşük pil uyarı eşiği).
+  - `kritik_v`: $10.5\text{ V}$ (Acil kritik deşarj eşiği).
+  - `tampon_s`: $10.0\text{ s}$ (Motor ivmelenmelerindeki anlık gerilim düşüşlerinin sahte alarm vermesini önleyen zaman filtresi; gerilim eşik altında kesintisiz $10\text{ s}$ kalmalıdır).
+- **Durum Makinesi Davranış Kuralları:**
+  1. **BOSTA İken Uyarı ($V < 11.0\text{ V}$):** Yeni görev istekleri anında reddedilir (`HATA pil düşük`) ve robot otomatik olarak `SARJA_GIT` durumuna geçerek şarj istasyonuna (`sarj` konumu, varsayılan `ev`) `NavigateToPose` başlatır.
+  2. **Görev İcrasında Uyarı ($V < 11.0\text{ V}$):** Aktif görev (kavrama, taşıma veya bırakma) kesilmez; görevin tamamlanmasına izin verilir (`_gorev_bitince_sarja_git = True`). Görev başarıyla bittiğinde robot eve dönmek yerine doğrudan `SARJA_GIT` durumuna geçer.
+  3. **Kritik Eşik ($V < 10.5\text{ V}$):**
+     - Eğer kavrama henüz gerçekleşmemişse (`KAVRAMAYA_GIT` veya `KOL_KAVRA` öncesi): Görev acilen iptal edilir (`kavrama_iptal`) ve derhal `SARJA_GIT` başlatılır.
+     - **Nesne Tutuluyorsa (`_nesne_tutuluyor = True`):** Robot nesneyi kesinlikle yere bırakmaz! Nesneyi pençesinde tutmaya devam ederek doğrudan şarj istasyonuna yönelir (`SARJA_GIT nesne tutuluyor` bildirimi).
+  4. **Şarj İstasyonunda (`SARJDA`):** Robot şarj istasyonuna vardığında durum `SARJDA` olur. Gerilim `uyari_v + 0.4 V` ($11.4\text{ V}$) eşiğini aştığında batarya doldu kabul edilir; durum `BOSTA`ya geçer ve yeni görev istekleri kabul edilmeye başlar.
+  5. **Şarj Başarısızlığı:** Şarja gidiş en fazla 2 kez yeniden denenir (`max_sarj_yeniden_dene = 2`, `sarj_zaman_asimi = 180.0 s`). Başarısız olursa `BASARISIZ sarj` verilir ve robot kilitlenerek yeni görev kabul etmez.
+- **Konu ve Test Arayüzü:**
+  - Gerçek donanımda batarya gerilimi `/limo_status` konusundaki (`limo_msgs/msg/LimoStatus`) `battery_voltage` alanından okunur.
+  - Simülasyon testlerinde `sahte_pil:=true` parametresi verilerek `/gorev/sahte_pil` konusu (`std_msgs/msg/Float32`) dinlenir. Operatör simülasyonda pili elle tetikleyebilir:
+    ```bash
+    ros2 topic pub --once /gorev/sahte_pil std_msgs/msg/Float32 "{data: 10.8}"
+    ```
+  - `/gorev/durum` konusundan $1\text{ Hz}$ frekansla canlı durum ve gerilim özeti yayınlanır (`DURUM BOSTA pil=11.20V`).
 
 ---
 
 ## 4. Parametre Referansı
 
-Sistem bileşenlerinin çalışma davranışını belirleyen kritik parametreler ve koddan doğrulanmış varsayılan değerleri aşağıda özetlenmiştir:
+Sistem bileşenlerinin çalışma davranışını belirleyen tüm parametreler ve koddan doğrulanmış varsayılan değerleri aşağıda özetlenmiştir:
 
 | Parametre Adı | Modül / Dosya | Veri Tipi | Varsayılan Değer | Anlamı ve Fiziksel Açıklaması | Ne Zaman Değiştirilir? |
 |---|---|---|---|---|---|
-| `d_kavrama` | `kavrama_dugumu`, `son_yaklasma`, `kavrama_yaklasim` | `float` | `0.22` (m) | Robot merkezinden kavrama noktasına olan boyuna mesafe. | Robot kolunun montaj pozisyonu veya tutucu (gripper) parmak boyu değiştiğinde. |
-| `yanal` | `kavrama_dugumu`, `son_yaklasma`, `kavrama_yaklasim` | `float` | `0.0` (m) | Kavrama noktasının robot simetri eksenine yanal ofseti (+ sol). | Kol robotun tam ortasına değil de şasinin soluna/sağına monte edilirse. |
+| `d_kavrama` | `kavrama_dugumu`, `son_yaklasma`, `kavrama_yaklasim` | `float` | `0.22` (m) | Robot merkezinden kavrama noktasına olan boyuna mesafe. | Robot kolunun montaj pozisyonu veya tutucu parmak boyu değiştiğinde. |
+| `yanal` | `kavrama_dugumu`, `son_yaklasma`, `kavrama_yaklasim` | `float` | `0.0` (m) | Kavrama noktasının robot simetri eksenine yanal ofseti (+ sol). | Kol robot simetri eksenine değil de soluna/sağına monte edilirse. |
 | `z_min` / `z_max` | `kavrama_dugumu` | `float` | `0.0` / `0.45` (m) | myCobot 280 kolunun dikey erişim alt ve üst sınırları. | Farklı bir manipülatör kol kullanıldığında veya taban yükseltici eklendiğinde. |
-| `q_kabul_xy` | `kavrama_dugumu` | `float` | `0.35` (m) | Nav2 Q pozuna varışta yakın kabul Öklid mesafe toleransı. | Nav2 dar koridorlarda Q'ya tam oturamayıp erken pes ediyorsa büyütülür ($0.40$). |
+| `q_kabul_xy` | `kavrama_dugumu` | `float` | `0.35` (m) | Nav2 Q pozuna varışta yakın kabul Öklid mesafe toleransı. | Nav2 dar alanlarda Q'ya tam oturamayıp erken pes ediyorsa büyütülür ($0.40$). |
 | `q_kabul_yaw` | `kavrama_dugumu` | `float` | `35.0` (derece) | Nav2 Q pozuna varışta yakın kabul açısal yönelim toleransı. | Robot Q noktasında yönünü tam hizalayamadan duruyorsa tolerans esnetilebilir. |
+| `q_erken_xy` | `kavrama_dugumu` | `float` | `0.20` (m) | Nav2 Q pozuna erken kabul mesafe eşiği. | MPPI son yaklaşma öncesi hedefe $20\text{ cm}$ kala beklemeden devretmek için. |
+| `q_erken_yaw` | `kavrama_dugumu` | `float` | `20.0` (derece) | Nav2 Q pozuna erken kabul açısal yönelim eşiği. | Açısal hizalama erken kabul toleransı esnetilmek istendiğinde. |
+| `q_erken_sure` | `kavrama_dugumu` | `float` | `1.0` (s) | Erken kabul eşikleri içinde kesintisiz kalınması gereken süre. | Robot hedefin önünden geçerken sahte tetiklemeyi önlemek için. |
+| `nav_q_zaman_asimi` | `kavrama_dugumu` | `float` | `90.0` (s) | Q pozuna seyrüsefer için tanınan azami süre. | Nav2 sıkışıp sonuca ulaşamadığında kurtarma/sonraki adaya geçiş eşiği. |
 | `bt_hassas` | `kavrama_dugumu` | `string` | `navigate_to_pose_hassas.xml` | Q pozuna giderken Nav2'ye iletilen davranış ağacı XML dosya yolu. | Özel kurtarma adımları veya farklı seyrüsefer ağaçları denenmek istendiğinde. |
 | `kavrama_arayuzu` | `gorev_dugumu` | `string` | `'auto'` | Kavrama çağrısı iletişim modu (`'auto'`, `'eylem'`, `'konu'`). | Eylem yerine doğrudan eski konu tabanlı arayüz zorlanmak istendiğinde `'konu'` verilir. |
 | `kavrama_eylem_bekleme_s` | `gorev_dugumu` | `float` | `5.0` (s) | `/kavra` eylem sunucusunun hazır olmasını bekleme zaman aşımı. | Sistem yükü yüksekken eylem sunucusu geç uyanıyorsa artırılabilir. |
-| `k_rho` | `son_yaklasma` | `float` | `0.6` | Astolfi mesafe hatası kazancı ($v = k_\rho \cdot \rho$). | Robot hedefe doğru çok yavaş yaklaşıyorsa artırılır; hedefe hücum ediyorsa azaltılır. |
+| `algi` | `kavrama.launch.py` | `string` | `'sahte'` | Başlatılacak algı düğümü türü (`'sahte'`, `'renk'`, `'yok'`). | Gerçek kameradan renk algısı istendiğinde `algi:=renk` verilir. |
+| `hata_ayiklama` | `kavrama.launch.py`, `renk_algi` | `bool` | `false` | Renk algı görsel teşhis konusunu (`/kavrama/algi_goruntu`) açma bayrağı. | Görüntü işleme çıktısını RViz'de incelemek için `hata_ayiklama:=true` verilir. |
+| `kenar_payi_px` | `renk_algi` | `int` | `4` (px) | Lekenin görüntü kenarına yakınlık emniyet sınırı (`KISMI` durumu). | Kenardan taşan kısmi nesnelerin hatalı merkez üretmesini önlemek için. |
+| `boyut_denetimi` | `renk_algi` | `bool` | `true` | Piksel boyutu ve derinlikten fiziksel çap tutarlılık denetimi bayrağı. | Yanlış renk eşleşmelerini ve arka plan lekelerini reddetmek için. |
+| `beklenen_yaricap_m` | `renk_algi` | `float` | `0.035` (m) | Boyut denetiminde hedeflenen fiziksel yarıçap (elma için $3.5\text{ cm}$). | Farklı boyutta nesne (örneğin büyük kutu) algılanmak istendiğinde. |
+| `k_rho` | `son_yaklasma` | `float` | `0.6` | Astolfi mesafe hatası kazancı ($v = k_\rho \cdot \rho$). | Robot hedefe doğru çok yavaş yaklaşıyorsa artırılır; hücum ediyorsa azaltılır. |
 | `k_alpha` | `son_yaklasma` | `float` | `1.8` | Astolfi hedef kerteriz kazancı ($\omega$ formülünde $\alpha$ çarpanı). | Robot hedefe yönelmekte gecikiyor ve yay çiziyorsa artırılır ($2.0$). |
-| `k_beta` | `son_yaklasma` | `float` | `-0.5` | Astolfi hedef yönelim kazancı ($\omega$ formülünde $\beta$ çarpanı, negatif olmalı). | Hedefe varış anında robot açısı istenen yönelimden sapıyorsa büyüklüğü artırılır (örn. $-0.7$). |
+| `k_beta` | `son_yaklasma` | `float` | `-0.5` | Astolfi hedef yönelim kazancı ($\omega$ formülünde $\beta$ çarpanı, negatif olmalı). | Hedefe varış anında robot açısı istenen yönelimden sapıyorsa büyüklüğü artırılır. |
 | `son_donus_mesafe`| `son_yaklasma` | `float` | `0.03` (m) | Son yaklaşma bandına giriş eşiği ($3\text{ cm}$). | Astolfi kutupsal tekilliğini önlemek için; robot erken dönmeye başlıyorsa küçültülür. |
 | `v_surunme` | `son_yaklasma` | `float` | `0.03` (m/s) | Son bantta ileri/geri sürünme hızı ($3\text{ cm/s}$). | Zemin kayganlığı nedeniyle robot hedefin üzerinden aşıyorsa $0.02$'ye düşürülür. |
 | `tol_xy` / `tol_yaw`| `son_yaklasma` | `float` | `0.01` (m) / `2.0` (deg) | Görevin başarıyla tamamlanması (`TAMAM`) için gereken son hata toleransları. | Daha hassas bir gripper kullanıldığında veya tolerans daraltılmak istendiğinde. |
-| `gorus_yari_aci` | `son_yaklasma` | `float` | `35.0` (derece) | Kameranın yatay görüş yarı açısı (toplam $70^\circ$ FOV için $35^\circ$). | Farklı lens veya farklı kamera (örn. geniş açılı balıkgözü kamera) takıldığında. |
-| `olcumsuz_mesafe` | `son_yaklasma` | `float` | `0.25` (m) | Bu mesafenin altında ölçüm kesilse dahi odomla sürünmeye izin verilen eşik. | Kameranın asgari odak/algılama mesafesi (minimum depth range) değiştiğinde. |
+| `gorus_yari_aci` | `son_yaklasma` | `float` | `35.0` (derece) | Kameranın yatay görüş yarı açısı (toplam $70^\circ$ FOV için $35^\circ$). | Farklı kamera veya farklı lens takıldığında. |
+| `olcumsuz_mesafe` | `son_yaklasma` | `float` | `0.25` (m) | Bu mesafenin altında kamera tahmini dondurulup odomla sürünmeye geçilen eşik. | Kamera kör noktası başladığında kısmi nesne sıçramalarını önlemek için. |
+| `aykiri_kabul_sayisi`| `son_yaklasma` | `int` | `3` | $10\text{ cm}$ üzerindeki sıçramaların kabul edilmesi için gereken ardışık ölçüm sayısı. | Tek karelik algı gürültülerini filtrelemek için. |
 | `pay_p` / `belirsizlik_p` | `kavrama_yaklasim` | `float` | `0.03` / `0.015` (m) | Kavrama pozunda ($P$) izin verilen tampon güvenlik payı ve belirsizlik. | Duvar dibindeki nesnelere yaklaşırken robot duvara sürtüyorsa artırılır. |
-| `d_on_min` / `d_on_max` | `kavrama_yaklasim` | `float` | `0.30` / `0.60` (m) | Q pozunun P'den geriye doğru taranacağı asgari ve azami koridor mesafeleri. | Ortam çok darsa $d_{\text{on\_min}}$ $0.25$'e çekilebilir; geniş alanda $d_{\text{on\_max}}$ artırılabilir. |
-| `yuzey_agirlik` | `kavrama_yaklasim` | `float` | `1.0` | Nesne çevresindeki yüzey normaline dik yaklaşma tercih katsayısı. | Robotun masaya/duvara dik yanaşması kritik değilse $0.0$ yapılarak kapatılabilir. |
-| `xy_goal_tolerance`| `nav2_diff.yaml` (`hassas_hedef`) | `float` | `0.15` (m) | Nav2 MPPI kontrolcüsünün Q noktasını kabul etme toleransı. | MPPI hedefe varışta osilasyona girip duramıyorsa $0.18$'e esnetilebilir. |
-| `min_obstacle_height` / `max_obstacle_height` | `nav2_diff.yaml` (`voxel_layer`) | `float` | `0.05` / `0.50` (m) | 3B derinlik bulutunun maliyet haritasına işleneceği yükseklik penceresi. | Zemin eğimliyse alt limit $0.07$'ye çıkarılır; masa altı yaklaşma için üst limit $0.50$ korunmalıdır. |
-| `time_before_collision` | `nav2_diff.yaml` (`collision_monitor`)| `float` | `1.2` (s) | Çarpışma izleyicisinin acil durdurma tetikleme zaman ufku. | Robot ani frenlemelerde çok agresif duruyorsa $1.0$'a çekilebilir. |
+| `d_on_min` / `d_on_max` | `kavrama_yaklasim` | `float` | `0.30` / `0.60` (m) | Q pozunun P'den geriye doğru taranacağı asgari ve azami koridor mesafeleri. | Ortam darsa $d_{\text{on\_min}}$ düşürülür; geniş alanda $d_{\text{on\_max}}$ artırılabilir. |
+| `hareketli_kalkan`| `limo_nav2.launch.py` | `bool` | `false` | Hız zincirine dinamik engel kalkanı düğümünü ekleme bayrağı. | Ortamda yürüyen insan veya hareketli araçlar varken `hareketli_kalkan:=true` verilir. |
+| `ttc_dur` | `hareketli_kalkan` | `float` | `1.5` (s) | Hareketli engele kalan çarpışma süresi bu değerin altına indiğinde durdurma eşiği. | Robot dinamik engeller karşısında daha erken fren yapsın istenirse artırılır ($2.0$). |
+| `ttc_yavas` | `hareketli_kalkan` | `float` | `3.0` (s) | Hareketli engele kalan çarpışma süresi bu değerin altına indiğinde yavaşlatma eşiği. | Yavaşlamanın daha uzaktan başlaması istenirse artırılır ($4.0$). |
+| `min_engel_hizi` | `hareketli_kalkan` | `float` | `0.20` (m/s) | Bir izin dinamik tehdit sayılması için gereken asgari mutlak hız. | Durağan mobilya ve kavrama hedeflerinin kalkanı tetiklemesini kesinlikle önler. |
+| `max_iz_yaricap` | `hareketli_kalkan` | `float` | `0.35` (m) | Takip edilecek kümelerin azami yarıçapı. | Duvar gibi geniş yapıların sahte iz oluşturmasını engeller. |
+| `uyari_v` | `gorev_yoneticisi` | `float` | `11.0` (V) | Düşük batarya uyarı eşiği. | Robot şarja daha erken yönelsin istenirse $11.2$'ye çıkarılabilir. |
+| `kritik_v` | `gorev_yoneticisi` | `float` | `10.5` (V) | Kritik batarya acil durdurma ve şarja dönüş eşiği. | Hücre hasarını önlemek için pil tipine göre ayarlanır. |
+| `tampon_s` | `gorev_yoneticisi` | `float` | `10.0` (s) | Gerilimin eşik altında kesintisiz kalması gereken filtre tampon süresi. | Anlık motor deşarj dalgalanmalarının sahte alarm tetiklemesini önler. |
+| `sahte_pil` | `gorev_dugumu` | `bool` | `false` | Simülasyonda `/gorev/sahte_pil` konusunu dinleme bayrağı. | Simülasyon ortamında düşük pil testleri koşturulurken `sahte_pil:=true` verilir. |
 | `kavrama_zaman_asimi`| `gorev_yoneticisi` | `float` | `240.0` (s) | Bir kavrama görevinin tamamlanması için tanınan azami süre. | Büyük haritalarda uzak hedeflere gidilirken süre yetersiz kalırsa artırılır. |
-| `gorsel` | `kavrama.launch.py` | `bool` | `'true'` | RViz işaretçi yayıncısını (`kavrama_gorsel`) başlatma bayrağı. | Kaynak tasarrufu için görselleştirme istenmediğinde `gorsel:=false` verilir. |
-| `rviz` | `kavrama.launch.py` | `bool` | `'false'` | RViz2'yi `kavrama.rviz` yapılandırmasıyla otomatik açma bayrağı. | Görsel arayüz doğrudan launch ile istenirse `rviz:=true` verilir. |
+| `tasima_zaman_asimi` | `gorev_yoneticisi` | `float` | `180.0` (s) | Bırakma istasyonuna taşıma seyrüseferi için azami süre. | Taşıma mesafesi uzunsa artırılır. |
+| `sarj_zaman_asimi` | `gorev_yoneticisi` | `float` | `180.0` (s) | Şarj istasyonuna seyrüsefer için azami süre. | İstasyon uzaksa artırılır. |
 
 ---
 
@@ -337,41 +387,61 @@ Sistemi simülasyon ortamında test etmek için gerekli komut dizilimi aşağıd
    export FASTRTPS_DEFAULT_PROFILES_FILE=$HOME/limo_robot/limo_ws/src/limo_bringup/config/fastdds_sim_shm.xml
    source /opt/ros/humble/setup.bash && source $HOME/limo_robot/limo_ws/install/setup.bash
 
+   # Standart AMCL lokalizasyonu ile (hareketli kalkan isteğe bağlı açılabilir):
    ros2 launch limo_bringup limo_sim_nav2.launch.py \
      headless:=true use_rviz:=false localization:=amcl \
      map:=$HOME/limo_robot/limo_ws/install/limo_bringup/share/limo_bringup/maps/lab_oda.yaml \
      world:=$HOME/limo_robot/limo_ws/install/limo_car/share/limo_car/worlds/lab_oda_3b.world
+
+   # Veya VO stres testi / saf odometri için (haritasız map->odom sabit):
+   # ros2 launch limo_bringup limo_sim_nav2.launch.py localization:=yok ...
    ```
 
-2. **Terminal 2 — AMCL Başlangıç Pozu İletimi:**
+2. **Terminal 2 — Başlangıç Pozu İletimi:**
    ```bash
-   ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
-     "{header: {frame_id: map}, pose: {pose: {orientation: {w: 1.0}}, covariance: [0.0025,0,0,0,0,0, 0,0.0025,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.003]}}"
+   # stamp 0 verilerek simülasyon saat uyuşmazlığı önlenmiştir:
+   python3 $HOME/limo_robot/limo_ws/saha/gece/ilk_poz.py 0 0 0
    ```
 
-3. **Terminal 3 — Kavrama, Görev Katmanı ve RViz Görselleştirme:**
+3. **Terminal 3 — Kavrama, Görev Katmanı ve Algı Modülü:**
    ```bash
-   # Sahte algı elma konumuyla (5.62, 0.8, 0.10) başlar, RViz penceresi açılır:
-   ros2 launch limo_autonomy kavrama.launch.py use_sim_time:=true sahte_algi:=true gorsel:=true rviz:=true
+   # Seçenek A: Sahte algı ile (elma konumu 5.62, 0.8, 0.10):
+   ros2 launch limo_autonomy kavrama.launch.py use_sim_time:=true algi:=sahte gorsel:=true rviz:=true
+
+   # Seçenek B: Kameradan gerçek renk algısı (renk_algi) ve hata ayıklama görüntüsü ile:
+   ros2 launch limo_autonomy kavrama.launch.py use_sim_time:=true algi:=renk hata_ayiklama:=true gorsel:=true rviz:=true
    ```
 
 4. **Terminal 4 — Görev İsteği Gönderme:**
    ```bash
-   # Erişilebilir doğu duvarı hedefi:
+   # Erişilebilir doğu duvarı hedefi (uçtan uca alma, taşıma, bırakma):
    ros2 topic pub --once /gorev/istek std_msgs/String "{data: elma}"
 
    # Olumsuz örnek (masa üstü z=0.75 m -> HATA erisilemez yukseklik üretir):
    ros2 topic pub --once /gorev/istek std_msgs/String "{data: masa_elma}"
    ```
 
-### 5.2. Otomatik Benchmark Betiği ([`kavrama_sim_test.sh`](file:///home/gunes/limo_robot/limo_ws/saha/nav/kavrama_sim_test.sh))
-Tüm simülasyon, Nav2, sahte algı ve ölçüm döngüsünü tek bir komutla başlatan, hedefleri sırayla koşturup sonuçları kaydeden ve işlem bitiminde tüm süreçleri temizleyen otomatik test betiği:
+### 5.2. Otomatik Kavrama Benchmark Betiği ([`kavrama_sim_test.sh`](file:///home/gunes/limo_robot/limo_ws/saha/nav/kavrama_sim_test.sh))
+Simülasyon, Nav2, sahte algı ve ölçüm döngüsünü başlatan, hedefleri sırayla koşturup sonuçları kaydeden ve işlem bitiminde tüm süreçleri temizleyen otomatik test betiği:
 ```bash
 cd ~/limo_robot/limo_ws
 ./saha/nav/kavrama_sim_test.sh src/limo_bringup/scripts/kavrama_hedefler_lab_oda.yaml saha/nav/cikti/kavrama_test
 ```
 
-### 5.3. Ölçüm Aracı ([`kavrama_bench.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/scripts/kavrama_bench.py)) ve Kabul Kriterleri
+### 5.3. Algı Simülasyon Test Betiği ([`algi_sim_test.sh`](file:///home/gunes/limo_robot/limo_ws/saha/gece/algi_sim_test.sh))
+Gazebo dünyasına gerçekçi elma modelini dinamik olarak doğuran (`spawn_entity.py`), kameradan gerçek renk algısını (`algi:=renk`) ve hata ayıklamayı başlatan, algı durumunu takip edip `/kavra` eylemini yürüten ve yer gerçeğiyle algı doğruluğunu raporlayan otomatik test betiği:
+```bash
+cd ~/limo_robot/limo_ws
+./saha/gece/algi_sim_test.sh saha/gece/cikti/algi_test
+```
+
+### 5.4. Dinamik Engel Ölçüm Aracı ([`dinamik_engel.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/scripts/dinamik_engel.py))
+Simülasyonda hareketli insan silindirini ($r=0.20\text{ m}, h=1.70\text{ m}$) 20 Hz'de hareket ettirerek Nav2 ve kalkan tepkisini (asgari açıklık, temas anı robot hızı, çarpışma durumu) ölçen araç:
+```bash
+python3 src/limo_bringup/scripts/dinamik_engel.py --senaryo karsidan --mode diff --zaman_asimi 120
+```
+
+### 5.5. Ölçüm Aracı ([`kavrama_bench.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/scripts/kavrama_bench.py)) ve Kabul Kriterleri
 Benchmark aracı, Gazebo simülatörünün ürettiği zemin gerçeği pozunu (`/odom_gercek`) dinleyerek robotun ulaştığı konumu hedeflenen kavrama noktası ($x_{\text{hedef}} = 0.22\text{ m}, y_{\text{hedef}} = 0.0\text{ m}$) ile karşılaştırır.
 
 **Kabul Kriterleri (KAVRANABILIR):**
@@ -379,40 +449,23 @@ Benchmark aracı, Gazebo simülatörünün ürettiği zemin gerçeği pozunu (`/
 - $|\Delta y| < 2.0\text{ cm}$
 - $|\text{Yön Hatası}| < 3.0^\circ$
 
-### 5.4. Son Ölçüm Sonuçları Tablosu
+### 5.6. Doğrulanmış Ölçüm Sonuçları Tablosu
 
-Simülasyon ortamında ([`kavrama_hedefler_lab_oda.yaml`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/scripts/kavrama_hedefler_lab_oda.yaml)) ve görev yöneticisi yapılandırmasında ([`nesneler_lab_oda.yaml`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/config/nesneler_lab_oda.yaml)) hedefleri üzerinde yapılan uçtan uca doğrulanmış son benchmark sonuçları:
+Simülasyon ortamında ([`kavrama_hedefler_lab_oda.yaml`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/scripts/kavrama_hedefler_lab_oda.yaml)), görev yöneticisi yapılandırmasında ([`nesneler_lab_oda.yaml`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/config/nesneler_lab_oda.yaml)) ve gece test koşularında ([`DEVIR.md`](file:///home/gunes/limo_robot/limo_ws/saha/gece/DEVIR.md)) elde edilen doğrulanmış son ölçüm sonuçları:
 
-| Hedef Adı | Harita Konumu $(x, y, z)$ | Sonuç | Toplam Süre | Son Yaklaşma Süresi | Kavrama Hatası $(\Delta x, \Delta y)$ | Toplam Mesafe Hatası | Açısal Yön Hatası | Bildirilen Fark | Kabul Durumu |
+| Test Senaryosu / Hedef | Harita Konumu $(x, y, z)$ | Sonuç | Toplam Süre | Son Yaklaşma | Kavrama Hatası $(\Delta x, \Delta y)$ | Mesafe Hatası | Açısal Yön Hatası | Ek Not / Ölçüm Ayrıntısı | Kabul Durumu |
 |---|---|---|---|---|---|---|---|---|---|
-| `dolap` / `kutu` | $(3.73, 2.18, 0.30)$ | `HAZIR` | $42.6\text{ s}$ | $7.5\text{ s}$ | $+0.4\text{ cm}, -0.7\text{ cm}$ | **$0.8\text{ cm}$** | **$+1.6^\circ$** | $3.2\text{ mm}$ | **`KAVRANABILIR`** |
-| `dogu_duvar` / `elma` | $(5.62, 0.80, 0.10)$ | `HAZIR` | $38.2\text{ s}$ | $6.8\text{ s}$ | $+0.5\text{ cm}, +0.5\text{ cm}$ | **$0.7\text{ cm}$** | **$+1.7^\circ$** | $2.8\text{ mm}$ | **`KAVRANABILIR`** |
-| `masa` / `masa_elma` | $(0.23, 1.40, 0.75)$ | `HATA` | $1.2\text{ s}$ | - | - | - | - | - | **`BEKLENEN_HATA`** |
+| `dolap` / `kutu` | $(3.73, 2.18, 0.30)$ | `HAZIR` | $42.6\text{ s}$ | $7.5\text{ s}$ | $+0.4\text{ cm}, -0.7\text{ cm}$ | **$0.8\text{ cm}$** | **$+1.6^\circ$** | Bildirilen fark $3.2\text{ mm}$ | **`KAVRANABILIR`** |
+| `dogu_duvar` / `elma` | $(5.62, 0.80, 0.10)$ | `HAZIR` | $38.2\text{ s}$ | $6.8\text{ s}$ | $+0.5\text{ cm}, +0.5\text{ cm}$ | **$0.7\text{ cm}$** | **$+1.7^\circ$** | Bildirilen fark $2.8\text{ mm}$ | **`KAVRANABILIR`** |
+| `/kavra` eylemi g6 (dolap) | $(3.73, 2.18, 0.30)$ | `SUCCEEDED` | — | $10.0\text{ s}$ | — | **$0.9\text{ cm}$** (tahmini) | **$0.3^\circ$** (tahmini) | — | **`KAVRANABILIR`** |
+| `elma` görevi g6 (N15) | $(5.62, 0.80, 0.10)$ | `TAMAM` | — | — | — | — | — | `NAV_Q erken_kabul (18.4 cm, 4.2°)` tetiklendi | kavra→taşı→bırak→eve dön |
+| `masa` / `masa_elma` | $(0.23, 1.40, 0.75)$ | `HATA` | $1.2\text{ s}$ | - | - | - | - | $z=0.75\text{ m} > z_{\text{max}}=0.45\text{ m}$ erişilemez yükseklik | **`BEKLENEN_HATA`** |
+| Saf Odom (`teker`) | 7 hedefli lab turu | $7/7$ `TAMAM` | $124.0\text{ s}$ | - | - | Ort. $0.20\text{ m}$ | - | Min açıklık $0.17\text{ m}$ (temassız) | **`GECTI`** |
+| Saf Odom (`vio_kotu`) | 7 hedefli lab turu | $6/7$ `TIMEOUT` | $>120\text{ s}$ | - | - | $0.31\text{--}0.44\text{ m}$ | - | `bati_dar` ($0.27\text{ m}$) temas ($0.0\text{ m}$), 18 kurtarma | **`KALDI (VO Gereksinimi)`** |
+| Dinamik Engel (Karşıdan) | $0.6\text{ m/s}$ insan | `robot_carpti` | - | - | - | - | - | Temas $-2.9\text{ cm}$, temasta hız $0.094\text{ m/s}$ | **`KALKAN GEREKTIRIR`** |
 
 > [!NOTE]
-> `masa` / `masa_elma` hedefinde $z = 0.75\text{ m}$ olup myCobot 280 kolunun fiziksel erişim tavanı olan $z_{\text{max}} = 0.45\text{ m}$'yi aştığı için sistem `HATA erisilemez yukseklik z=0.75` üreterek robotu gereksiz yere yormadan görevi güvenle durdurmuştur (olumsuz test doğrulaması).
-> `elma` nesnesi doğu duvarı dibinde $z = 0.10\text{ m}$ yüksekliğinde konumlandırılmıştır ve başarıyla kavranabilmektedir.
-
-Örnek konsol günlük çıktısı:
-```text
-=================================================================================================================
- KAVRAMA YAKLAŞMASI SİMÜLASYON BENCHMARK SONUÇLARI (Görev N6)
-=================================================================================================================
-Hedef      Sonuç    Süre(s)   SonYakl(s)    Δx(cm)   Δy(cm)   Mesafe(cm)   Yön(°)   Fark(mm)   Kabul         
------------------------------------------------------------------------------------------------------------------
-dolap      HAZIR    42.6      7.5           +0.4     -0.7     0.8          +1.6     3.2        KAVRANABILIR  
-dogu_duvar HAZIR    38.2      6.8           +0.5     +0.5     0.7          +1.7     2.8        KAVRANABILIR  
-masa       HATA     1.2       -             +0.0     +0.0     0.0          +0.0     -          BEKLENEN_HATA 
-=================================================================================================================
- ÖZET İSTATİSTİKLER:
-  Başarı Oranı              : 3/3 (%100.0)
-  Kavranabilir Oranı        : 3/3 (%100.0)
-  Kavrama Hatası (cm)       : Medyan = 0.75 cm, Maks = 0.80 cm (Kriter: < 2.0 cm)
-  Yön Hatası (derece)       : Medyan = 1.65°, Maks = 1.70° (Kriter: < 3.0°)
-  Bildirilen-Gerçek Farkı   : Medyan = 3.0 mm, Maks = 3.2 mm
-  Genel Sonuç               : KAVRANABILIR (GEÇTİ)
-=================================================================================================================
-```
+> Görev g6 koşusunda Q pozuna yaklaşırken MPPI yerel kontrolcüsünün son duruş salınımı beklenmeden `NAV_Q erken_kabul (18.4 cm, 4.2°)` devreye girmiş ve `elma` görevi `TAMAM` ile bitmiştir (aynı koşudaki `/kavra` dolap eylemi: tahmini 0.9 cm / 0.3°).
 
 ---
 
@@ -420,14 +473,14 @@ masa       HATA     1.2       -             +0.0     +0.0     0.0          +0.0 
 
 Simülasyondan gerçek donanıma geçişte donanımsal hasarları önlemek ve kesintisiz entegrasyon sağlamak için aşağıdaki adımlar sırayla tamamlanmalıdır:
 
-- [ ] **1. Algı Konusu Yayını (`/kavrama/nesne_algi`):**
+- [ ] **1. Algı Konusu Yayını (`/kavrama/nesne_algi`, `renk_algi.py`):**
   - Gerçek RealSense D435 kamera sürücüsünün çalıştığı ve `/camera/color/image_raw` ile derinlik konularını ürettiği doğrulanmalıdır:
     ```bash
     ros2 topic hz /camera/color/image_raw
     ```
-  - Nesne tespit/algı düğümünün nesneyi tespit ederek `/kavrama/nesne_algi` konusuna `PointStamped` formatında yayın yaptığı doğrulanmalıdır:
+  - `renk_algi` düğümünün nesneyi tespit ederek `/kavrama/nesne_algi` konusuna yayın yaptığı, kadraj dışına taştığında `/kavrama/nesne_algi_durum` konusunun `KISMI` bildirdiği teyit edilmelidir:
     ```bash
-    ros2 topic echo /kavrama/nesne_algi --once
+    ros2 topic echo /kavrama/nesne_algi_durum
     ```
   - TF ağacında `camera_color_optical_frame -> base_link -> base_footprint -> odom` dönüşüm zincirinin canlı ve zaman uyumlu olduğu (`tf2_echo`) kontrol edilmelidir:
     ```bash
@@ -438,32 +491,35 @@ Simülasyondan gerçek donanıma geçişte donanımsal hasarları önlemek ve ke
   - myCobot 280 seri port bağlantısı (`/dev/ttyUSB*` veya `/dev/ttyACM*`) ve ROS 2 sürücüsü ayağa kaldırılmalıdır.
   - Launch dosyasında `kol_sahte:=false` parametresi verilmelidir:
     ```bash
-    ros2 launch limo_autonomy kavrama.launch.py kol_sahte:=false
+    ros2 launch limo_autonomy kavrama.launch.py kol_sahte:=false algi:=renk
     ```
-  - `/kol/kavra` ve `/kol/birak` servislerinin `std_srvs/srv/Trigger` tipinde hazır olduğu `ros2 service list` ile teyit edilmelidir:
+  - `/kol/kavra` ve `/kol/birak` servislerinin hazır olduğu teyit edilmelidir:
     ```bash
     ros2 service call /kol/kavra std_srvs/srv/Trigger "{}"
     ```
 
 - [ ] **3. Görsel Odometri (VO) ve Tekerlek Kalibrasyonu:**
   - Gerçek taban odometrisi `/odom` ve `odom -> base_footprint` TF yayını $50\text{ Hz}$ hızında dinlenmelidir.
-  - Dönüş ölçek faktörü ($k_w = 0.9954$) ve doğrusal öteleme faktörü ($k_v = 1.0188$) uygulanarak robotun yerinde dönüşlerde açı kayması minimize edilmiş olmalıdır (bkz. [sim_gercek.md](file:///home/gunes/limo_robot/limo_ws/docs/sim_gercek.md)).
-  - Robot elle itildiğinde veya teleop ile sürüldüğünde odometride ani koordinat sıçraması olmamalıdır.
+  - Dar geçitlerde kaymanın $<0.15\text{ m}$ olduğu teyit edilmeli; kayma fazlaysa `localization:=amcl` (veya Görsel SLAM) harita düzeltmesi devrede tutulmalıdır.
+  - Robot elle itildiğinde veya sürüldüğünde odometride ani koordinat sıçraması olmamalıdır.
 
 - [ ] **4. Hız Sınırları ve Güvenlik Rampaları:**
   - [`velocity_smoother`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/param/nav2_diff.yaml#L427) ivme sınırlarının devrede olduğu doğrulanmalıdır: doğrusal ivme azami $1.0\text{ m/s}^2$, açısal ivme azami $3.0\text{ rad/s}^2$.
   - Son yaklaşma denetleyicisi hız parametrelerinin aşırı agresif olmadığı teyit edilmelidir ($v_{\text{max}} = 0.10\text{ m/s}$, $v_{\text{surunme}} = 0.03\text{ m/s}$, $\omega_{\text{max}} = 0.6\text{ rad/s}$).
 
-- [ ] **5. Collision Monitor ve 3B Voxel Katmanı Güvenliği:**
+- [ ] **5. Collision Monitor ve Hareketli Kalkan Güvenliği:**
   - `point_cloud_xyz_node` ile D435 derinliğinden `/camera/depth/points` üretildiği ve `voxel_layer` tarafından yerel maliyet haritasına işlendiği kontrol edilmelidir.
-  - [`collision_monitor`](file:///home/gunes/limo_robot/limo_ws/src/limo_bringup/param/nav2_diff.yaml#L391) eklentisinin devrede olduğu ve engel algılandığında `cmd_vel` komutunu anında sıfırladığı teyit edilmelidir:
+  - İnsanların ve hareketli nesnelerin bulunduğu ortamlarda `hareketli_kalkan:=true` argümanı açılmalı ve `/hareketli_kalkan/durum` konusunun yaklaşan dinamik engellerde `DUR` veya `YAVAS` ürettiği test edilmelidir:
     ```bash
-    ros2 topic echo /collision_monitor_state
+    ros2 topic echo /hareketli_kalkan/durum
     ```
 
-- [ ] **6. İlk Fiziksel Deneme Prosedürü:**
+- [ ] **6. Pil Durumu ve Koruma Eşikleri:**
+  - `/limo_status` konusundan gerçek batarya geriliminin okunduğu ve gerilim $11.0\text{ V}$ altına indiğinde görev yöneticisinin yeni istekleri reddedip şarja yöneldiği test edilmelidir.
+
+- [ ] **7. İlk Fiziksel Deneme Prosedürü:**
   1. Robot tekerlekleri takoz üzerine alınarak havada boşta sürüş testi yapılmalıdır.
-  2. Acil durdurma için joystick veya klavye üzerinden `/kavrama/iptal` tetikleme komutu hazır bulundurulmalıdır:
+  2. Acil durdurma için klavye üzerinden `/kavrama/iptal` komutu hazır bulundurulmalıdır:
      ```bash
      ros2 topic pub --once /kavrama/iptal std_msgs/msg/Empty "{}"
      ```
@@ -477,11 +533,12 @@ Sistemin mevcut sürümünde bilinen kısıtlar ve gelecek geliştirme adımlar�
 
 1. **Manipülatör Dikey Erişim Kısıtı:**
    myCobot 280 kolu masa seviyesindeki ($z = 0.75\text{ m}$) nesnelere şasi üzerinden doğrudan uzanamamaktadır. Şu anda zemin ve alçak sehpalar ($0.0\text{--}0.45\text{ m}$) desteklenmektedir. Masalar için kola dikey bir asansör/kaldırma mekanizması eklenmesi planlanmaktadır.
-2. **Kamera Kör Noktası ($<0.25\text{ m}$):**
-   RealSense D435 kameranın asgari netleme mesafesi yaklaşık $0.20\text{--}0.25\text{ m}$'dir. Nesneye çok yaklaşıldığında algı kesilmektedir. Mevcut mimari bunu son odometri tahminiyle kör sürünerek telafi etmektedir; ancak tutucu parmaklarının ucuna takılacak mini bir "eye-in-hand" mikro kamera ile son $5\text{ cm}$'de görsel geribesleme sağlanması hedeflenmektedir.
+2. **Kamera Kör Noktası ($<0.25\text{ m}$) ve Tahmin Dondurma:**
+   RealSense D435 kameranın asgari netleme mesafesi yaklaşık $0.20\text{--}0.25\text{ m}$'dir. Nesneye çok yaklaşıldığında leke kadraj kenarına taşmakta (`kenar_payi_px`) ve kısmi görünüm nedeniyle $49\text{ cm}$'lik yanıltıcı ölçüm sıçramaları oluşturabilmektedir. Mevcut mimari bunu $\rho < 0.25\text{ m}$ mesafesinde tahmini dondurarak (`tahmin_donduruldu`) ve yüksek frekanslı odometriyle kör sürünerek çözmüştür. İleriki aşamada tutucu parmak ucuna mini bir mikro kamera eklenmesi hedeflenmektedir.
 3. **Hareket Bulanıklığı (Motion Blur):**
    Gerçek robotta hızlı yerinde dönüşlerde ($\omega > 0.2\text{ rad/s}$) D435 renkli kamerasında belirgin hareket bulanıklığı oluşmaktadır. Algı ekibinin keskin kareler yakalayabilmesi için yaklaşma sırasında dönüş hızları sınırlandırılmıştır; ilerleyen aşamada pozlama süresi kilitlenecektir.
 4. **VLMaps / Semantik Harita Entegrasyonu:**
-   Doğal dil sorgularından ("elmayı getir") elde edilen kaba 3B VLMaps kümeleri $\pm 10\text{--}20\text{ cm}$ belirsizlik içerebilmektedir. Sistem bu kaba konumu `/kavrama/hedef` veya `/kavra` eylemi olarak alıp Q noktasına kadar gidebilmekte, oradan kamerayla ince tespit yapmaktadır. YOLOv8-world / 6D Pose kestirim düğümünün gerçek zamanlı entegrasyonu tamamlanacaktır.
+   Doğal dil sorgularından ("elmayı getir") elde edilen kaba 3B VLMaps kümeleri $\pm 10\text{--}20\text{ cm}$ belirsizlik içerebilmektedir. Sistem bu kaba konumu `/kavrama/hedef` veya `/kavra` eylemi olarak alıp Q noktasına kadar gidebilmekte, oradan kamerayla ince tespit yapmaktadır. YOLOv8-world / 6D Pose kestirim düğümünün entegrasyonu tamamlanacaktır.
 5. **Dinamik Engeller ve Hareketli Ortamlar:**
-   Mevcut statik harita yaklaşım planlayıcısı ([`kavrama_yaklasim.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/kavrama_yaklasim.py)), ortamdaki yeni beliren veya yeri değişen engelleri (örneğin sandalyeler) doğrudan dinamik hesaba katmamaktadır; bu durum yerel costmap ve son yaklaşma güvenlik konisi ile çözülmektedir. İleriki fazda yaklaşma koridorunun yerel costmap ile dinamik güncellenmesi sağlanacaktır.
+   Mevcut statik collision_monitor konfigürasyonu yaklaşan dinamik engellerin hız vektörünü hesaba katamadığından karşıdan gelen insan senaryolarında temas öncesi durdurma yetersiz kalabilmektedir (simülasyonda $-2.9\text{ cm}$ temas ve $0.094\text{ m/s}$ hız kaydedilmiştir). Bu kısıtı aşmak üzere bağıl hız ve TTC tabanlı [`hareketli_kalkan.py`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/hareketli_kalkan.py) geliştirilmiştir.
+   Hareketli kalkan sim ölçümü (N16): karşıdan insan → temasta robot duruyor (`engel_carpti`, v 0.000), yandan geçen → temas yok (+0.13 m), duran/takip 0 tetikleme; ancak engelsiz gezinme turunda yanlış alarmlar (9 DUR, 120→150 s) → N19 düzeltmesi doğrulanana kadar `hareketli_kalkan` varsayılan kapalı.

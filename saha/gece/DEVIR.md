@@ -45,3 +45,10 @@ Bitince: `ajan rapor <etiket>` → diff oku → testleri KENDİN çalıştır �
   Tepkisiz insan 0.6 m/s ile kafa kafaya geliyor; robot yavaşlıyor ama tam durmuyor. DurBolge önünü büyütmek kavrama
   yaklaşmasını (nesne gövdeye 6 cm) bozar → ayrı ele alınmalı (kavrama sırasında bölge değiştirme ya da hıza bağlı bölge).
 - ilk_poz.py: duvar saati damgası sim saatinde "gelecek" sayılıp AMCL tarafından reddediliyordu → stamp 0 (düzeltildi).
+- N16 hareketli_kalkan (hareketli_kalkan:=true, vars. kapalı): karşıdan temasta robot DURUYOR (engel_carpti, v 0),
+  yandan temas yok (+0.13 m), duran/takip 0 tetikleme. AMA engelsiz turda 9 DUR + 7 YAVAS yanlış alarm (120→150 s)
+  → N19 (zaman aradeğeri, belirsiz eşleşme, yön tutarlılığı). N19 doğrulanmadan varsayılan açılmamalı.
+- N17 sonrası kamera algısıyla (algi:=renk) uçtan uca kavrama: −0.7 cm / −1.3°, son yaklaşma 8.3 s.
+  Sahte algı gerileme: dolap 0.21 cm/0.4°, duvar 0.38 cm/0.9° (öncekinden iyi), masa beklenen hata.
+  Not: renk_algi uzak ölçüm ortalaması 9.5 cm, mesaj sayısı 579→54 (boyut denetimi) — incelenecek.
+- "Nav2 açılmadı" yanlış başarısızlıkları: ros2 lifecycle CLI keşfi; betikler bekle_aktif.py'ye geçti.
