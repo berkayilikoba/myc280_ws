@@ -10,6 +10,7 @@ ROS'suz saf Python ve pytest ile çalışır:
 7. Robot da odom'da hareket ederken durağan nesnenin hızı ≈ 0 kestiriliyor
 8. Tarama noktaları filtreleme ve lidar_x ofseti
 9. 0.5 s boyunca görülmeyen izin silinmesi
+10. N26 Statik harita çıkarımı (ikili genişletme, dolu hücre sorgusu, duvar-insan ayrımı)
 """
 
 from __future__ import annotations
@@ -27,10 +28,14 @@ from limo_autonomy.hareketli_kalkan import (
     belirsiz_izler_kumesi,
     carpismaya_kalan_sure,
     eslestir,
+    harita_maskesi_genislet,
+    harita_noktalarini_ele,
+    haritada_dolu_mu,
     kalkan_karari,
     komutu_olcekle,
     kume_merkezleri_odoma,
     kumele,
+    noktalar_harita_cercevesine,
     odom_zaman_asimi_kontrolu,
     poz_aradeger,
     tarama_noktalari,
@@ -1118,3 +1123,339 @@ def test_n25_bir_tarama_kacirilan_insan_ayni_kimlikle_devam_eder() -> None:
     assert izler3[0].id == insan_id, f"İz ID'si değişti: beklenen {insan_id}, bulunan {izler3[0].id}"
     assert abs(izler3[0].v - v_insan) <= 0.10, f"Hız kestirimi bozuldu: {izler3[0].v:.3f} m/s"
     assert izler3[0].gorulme >= 2
+
+
+def test_n26_harita_maskesi_genislet() -> None:
+    """N26 Test (1): harita_maskesi_genislet saf fonksiyonunun kare çekirdekle ikili genişletme testi."""
+    # 1. pay_hucre = 0: Harita maskesi değişmeden aynı kalır
+    grid_0 = np.array([
+        [0, 1, 0],
+        [0, 0, 0],
+        [1, 0, 0],
+    ], dtype=bool)
+    sonuc_0 = harita_maskesi_genislet(grid_0, pay_hucre=0)
+    assert np.array_equal(sonuc_0, grid_0)
+
+    # 2. pay_hucre = 1: Tek dolu piksel (row=5, col=5) 3x3 kare bloğa genişler
+    grid_1 = np.zeros((11, 11), dtype=bool)
+    grid_1[5, 5] = True
+    sonuc_1 = harita_maskesi_genislet(grid_1, pay_hucre=1)
+    assert np.sum(sonuc_1) == 9
+    assert np.all(sonuc_1[4:7, 4:7])
+    assert not np.any(sonuc_1[:4, :])
+    assert not np.any(sonuc_1[7:, :])
+    assert not np.any(sonuc_1[:, :4])
+    assert not np.any(sonuc_1[:, 7:])
+
+    # 3. pay_hucre = 2: Tek dolu piksel (row=5, col=5) 5x5 kare bloğa genişler
+    sonuc_2 = harita_maskesi_genislet(grid_1, pay_hucre=2)
+    assert np.sum(sonuc_2) == 25
+    assert np.all(sonuc_2[3:8, 3:8])
+
+    # 4. Sınır / köşe pürüzsüzlüğü: (0, 0) ve (H-1, W-1) hücreleri indeks hatası vermeden genişler
+    grid_kose = np.zeros((10, 15), dtype=bool)
+    grid_kose[0, 0] = True
+    grid_kose[9, 14] = True
+    sonuc_kose = harita_maskesi_genislet(grid_kose, pay_hucre=2)
+    # (0, 0) köşesi [0..2, 0..2] = 3x3 = 9 hücre
+    assert np.all(sonuc_kose[0:3, 0:3])
+    # (9, 14) köşesi [7..9, 12..14] = 3x3 = 9 hücre
+    assert np.all(sonuc_kose[7:10, 12:15])
+    assert np.sum(sonuc_kose) == 18
+
+    # 5. Boş harita -> boş döner
+    grid_bos = np.zeros((8, 8), dtype=bool)
+    assert np.sum(harita_maskesi_genislet(grid_bos, pay_hucre=3)) == 0
+
+    # 6. Tümü dolu harita -> tümü dolu döner
+    grid_dolu = np.ones((6, 6), dtype=bool)
+    assert np.all(harita_maskesi_genislet(grid_dolu, pay_hucre=2))
+
+
+def test_n26_haritada_dolu_mu_sorgusu() -> None:
+    """N26 Test (2): haritada_dolu_mu saf fonksiyonunun sınır, orijin, çözünürlük ve harita dışı nokta testleri."""
+    # Harita parametreleri: çözünürlük 0.05 m, orijin (2.0, -3.0)
+    cozunurluk = 0.05
+    orijin = (2.0, -3.0)
+    H, W = 40, 50  # x: [2.0, 4.50], y: [-3.0, -1.0]
+
+    maske = np.zeros((H, W), dtype=bool)
+    # Hücre (row=10, col=20) dolu olsun
+    # x aralığı: [2.0 + 20*0.05, 2.0 + 21*0.05] = [3.00, 3.05]
+    # y aralığı: [-3.0 + 10*0.05, -3.0 + 11*0.05] = [-2.50, -2.45]
+    maske[10, 20] = True
+
+    # 1. Dolu hücrenin merkezi sorgulanınca True dönmeli
+    pt_dolu = [(3.025, -2.475)]
+    res_dolu = haritada_dolu_mu(pt_dolu, maske, cozunurluk, orijin)
+    assert res_dolu.shape == (1,)
+    assert bool(res_dolu[0]) is True
+
+    # 2. Boş hücre (col=21, x=3.075) sorgulanınca False dönmeli
+    pt_bos = [(3.075, -2.475)]
+    assert bool(haritada_dolu_mu(pt_bos, maske, cozunurluk, orijin)[0]) is False
+
+    # 3. Harita dışı noktalar: 4 ana yönde de harita dışı nokta -> dolu DEĞİL (False)
+    harita_disi_noktalar = [
+        (1.95, -2.475),   # x < ox (sol sınırın dışı)
+        (4.55, -2.475),   # x >= ox + W*res (sağ sınırın dışı)
+        (3.025, -3.05),   # y < oy (alt sınırın dışı)
+        (3.025, -0.95),   # y >= oy + H*res (üst sınırın dışı)
+        (100.0, 100.0),   # çok uzak
+        (-100.0, -100.0), # çok uzak
+    ]
+    res_dis = haritada_dolu_mu(harita_disi_noktalar, maske, cozunurluk, orijin)
+    assert len(res_dis) == len(harita_disi_noktalar)
+    assert not np.any(res_dis), "Harita dışı noktalar dolu sayılmamalı (dolu DEĞİL)!"
+
+    # 4. Sınır değerleri (tam köşe ve alt sınırlar)
+    sinir_noktalari = [
+        (2.0, -3.0),                             # tam orijin hücresi (0, 0)
+        (4.50 - 1e-5, -1.0 - 1e-5),              # en üst-sağ geçerli köşe (H-1, W-1)
+        (4.50, -2.0),                            # x tam sağ sınırda -> dışı (False)
+        (3.0, -1.0),                             # y tam üst sınırda -> dışı (False)
+    ]
+    res_sinir = haritada_dolu_mu(sinir_noktalari, maske, cozunurluk, orijin)
+    assert bool(res_sinir[2]) is False
+    assert bool(res_sinir[3]) is False
+
+    # 5. Orijin nesnesi çeşitleri (demet, 3-demet, nesne)
+    class MockOrigin:
+        class Position:
+            x = 2.0
+            y = -3.0
+        position = Position()
+    assert bool(haritada_dolu_mu(pt_dolu, maske, cozunurluk, MockOrigin())[0]) is True
+    assert bool(haritada_dolu_mu(pt_dolu, maske, cozunurluk, (2.0, -3.0, 0.0))[0]) is True
+
+    # 6. Boş girdi ve geçersiz koordinat (NaN / Inf) dayanıklılığı
+    assert len(haritada_dolu_mu([], maske, cozunurluk, orijin)) == 0
+    res_nan = haritada_dolu_mu([(float('nan'), 0.0), (float('inf'), -2.0)], maske, cozunurluk, orijin)
+    assert not np.any(res_nan)
+
+
+def test_n26_duvar_ve_insan_sentetik_tarama_cikarimi() -> None:
+    """N26 Test (3): Duvar + 0.25 m yanında insan sentetik taramasında:
+    - Çıkarım aktifken: Duvar elenir, insan tek başına ayrı küme olur (r <= 0.30 m).
+    - Çıkarım kapalıyken: İnsan ve duvar noktaları zincirlenip büyük küme oluşturur (r > 0.30 m / max_iz_yaricap eler)."""
+    cozunurluk = 0.05
+    orijin = (0.0, 0.0)
+    H, W = 100, 160  # y: [0.0, 5.0], x: [0.0, 8.0]
+
+    # Statik harita: x >= 5.70 olan yerler duvar (dolu)
+    grid = np.zeros((H, W), dtype=bool)
+    x_duvar_min = 5.70
+    col_duvar_min = int(round(x_duvar_min / cozunurluk))  # col >= 114
+    grid[:, col_duvar_min:] = True
+
+    # harita_pay_m = 0.10 m genişletme (pay_hucre = 2) -> maske x >= 5.60'a genişler
+    pay_hucre = int(round(0.10 / cozunurluk))
+    maske_genis = harita_maskesi_genislet(grid, pay_hucre)
+
+    # Robot poz map: robot x=5.0 m, y=1.0 m, yaw=0.0 rad
+    robot_pose_map = (5.0, 1.0, 0.0)
+
+    # 1. İnsan noktaları: x_map = 5.45 m (duvardan tam 5.70 - 5.45 = 0.25 m uzakta), y_map ~ 1.0 m
+    # base_link koordinatlarında (robot (5.0, 1.0) olduğundan):
+    # x_base = 5.45 - 5.0 = 0.45 m
+    # İnsanı temsil eden r ~ 0.15 m'lik kompakt 5 nokta
+    insan_pts_base = np.array([
+        [0.45, -0.08],
+        [0.42, -0.04],
+        [0.45,  0.00],
+        [0.48,  0.04],
+        [0.45,  0.08],
+    ])
+
+    # 2. Duvar noktaları: x_map = 5.70 m -> x_base = 0.70 m
+    # y_base = 0.15'ten 0.90'a kadar 0.06 m adımlarla (<= 0.10 m esik) sıralı 13 nokta
+    duvar_pts_base = []
+    for yb in np.linspace(0.15, 0.90, 13):
+        duvar_pts_base.append([0.70, yb])
+    duvar_pts_base = np.array(duvar_pts_base)
+
+    # 3. Sıyırma açısında geçiş noktası: insan ile duvar arasında ardışık mesafe <= 0.10 m olacak nokta
+    # İnsanın son noktası (0.48, 0.08), duvar başlangıcı (0.70, 0.15)
+    # Mesafe (0.48, 0.08) ile (0.55, 0.11) arası sqrt(0.07^2 + 0.03^2) = 0.076 m <= 0.10 m
+    # Mesafe (0.55, 0.11) ile (0.62, 0.13) arası sqrt(0.07^2 + 0.02^2) = 0.073 m <= 0.10 m
+    # Mesafe (0.62, 0.13) ile (0.70, 0.15) arası sqrt(0.08^2 + 0.02^2) = 0.082 m <= 0.10 m
+    # x_base=0.62 -> x_map=5.62 (genişletilmiş duvar maskesi x>=5.60 içindedir!)
+    gecis_pts_base = np.array([
+        [0.53, 0.10],  # x_map = 5.53 (serbest bölge; (0.45,0.08)->0.082 m, ->(0.62,0.13) 0.095 m)
+        [0.62, 0.13],  # x_map = 5.62 (genişletilmiş duvar maskesinde!)
+    ])
+
+    # Taramadaki sıralı tüm noktalar
+    tarama_pts_base = np.vstack([insan_pts_base, gecis_pts_base, duvar_pts_base])
+
+    # -------------------------------------------------------------
+    # (A) ÇIKARIM KAPALIYKEN (Eski Davranış):
+    # İnsan ve duvar noktaları birbirine zincirlenir (kume_esik = 0.10 m)
+    # -------------------------------------------------------------
+    merkezler_eski, yaricaplar_eski = kumele(tarama_pts_base, esik=0.10, min_nokta=3)
+    # Zincirlendiği için tek bir devasa küme oluşur
+    assert len(merkezler_eski) == 1, f"Zincirlenmiş 1 küme beklenirken {len(merkezler_eski)} küme bulundu"
+    r_eski = yaricaplar_eski[0]
+    # Küme yarıçapı 0.30 m'den büyüktür ve max_iz_yaricap (0.35 m) sınırını aşar!
+    assert r_eski > 0.30, f"Eski davranışta küme yarıçapı {r_eski:.3f} m > 0.30 m olmalı"
+    assert r_eski > 0.35, f"Eski davranışta küme yarıçapı {r_eski:.3f} m > 0.35 m (max_iz_yaricap) olmalı"
+    # Filtrelendiğinde insan elenir (0 küme kalır)
+    secili_eski = [i for i, r in enumerate(yaricaplar_eski) if r <= 0.35]
+    assert len(secili_eski) == 0, "Eski davranışta insan duvarla birleştiği için max_iz_yaricap ile elenmeliydi!"
+
+    # -------------------------------------------------------------
+    # (B) ÇIKARIM AÇIKKEN (N26 Statik Harita Çıkarımı):
+    # Duvar ve tampon bölgedeki noktalar elenir, insan tek başına ayrı küme kalır (r <= 0.30 m)
+    # -------------------------------------------------------------
+    pts_filtrelenmis = harita_noktalarini_ele(
+        noktalar_base=tarama_pts_base,
+        robot_pose_map=robot_pose_map,
+        maske=maske_genis,
+        cozunurluk=cozunurluk,
+        orijin=orijin,
+    )
+
+    # Duvar noktalarının tümü ve x_map >= 5.60 olan geçiş noktası elenmiş olmalı
+    # Kalan noktaların map'teki x koordinatları < 5.60 olmalı
+    pts_kalan_map = noktalar_harita_cercevesine(pts_filtrelenmis, robot_pose_map)
+    assert np.all(pts_kalan_map[:, 0] < 5.60)
+
+    # Kalan noktalar kümelenir
+    merkezler_yeni, yaricaplar_yeni = kumele(pts_filtrelenmis, esik=0.10, min_nokta=3)
+
+    # İnsan ayrı küme olarak tespit edilir!
+    assert len(merkezler_yeni) == 1, f"Yalnızca insan kümesi (1 küme) beklenirken {len(merkezler_yeni)} bulundu"
+    r_insan = yaricaplar_yeni[0]
+    # İstenen şart: insan ayrı küme ve r <= 0.30 m!
+    assert r_insan <= 0.30, f"Çıkarım sonrası insan küme yarıçapı {r_insan:.3f} m <= 0.30 m olmalı"
+    # İnsan merkezi robota göre x ~ 0.45 m civarında olmalı
+    assert abs(merkezler_yeni[0][0] - 0.45) < 0.05
+    # max_iz_yaricap (0.35 m) filtresini başarıyla geçer!
+    secili_yeni = [i for i, r in enumerate(yaricaplar_yeni) if r <= 0.35]
+    assert len(secili_yeni) == 1
+
+
+def test_n26_dugum_harita_filtreleme_ve_tf_yonetimi() -> None:
+    """N26 Test (4): HareketliKalkan düğümünde harita aboneliği, TF ile filtreleme ve TF hatasında uyarı testleri."""
+    from unittest.mock import MagicMock
+    from nav_msgs.msg import OccupancyGrid
+    from sensor_msgs.msg import LaserScan
+    from std_msgs.msg import Header
+
+    node = object.__new__(HareketliKalkan)
+    node.etkin = True
+    node.harita_cikar = True
+    node.harita_pay_m = 0.10
+    node.harita_esik = 65
+    node.harita_cercevesi = 'map'
+    node.govde_cercevesi = 'base_link'
+    node.lidar_x = 0.0
+    node.lidar_y = 0.0
+    node.lidar_yaw = 0.0
+    node.max_menzil = 10.0
+    node.kume_esik = 0.10
+    node.kume_min_nokta = 3
+    node.max_iz_yaricap = 0.35
+    node.robot_yaricap = 0.20
+    node.min_engel_hizi = 0.20
+    node.min_gorulme = 3
+    node.min_iz_yasi_s = 0.35
+    node.yon_tutarlilik = 0.7
+    node.ttc_dur = 1.5
+    node.ttc_yavas = 3.0
+    node.tarama_zaman_asimi = 0.5
+    node.eski_tarama_tutma_s = 0.5
+    node.odom_zaman_asimi = 0.5
+
+    node.takipci = IzTakipci()
+    node.tf_buffer = MagicMock()
+    node.get_logger = MagicMock()
+    node.p_cmd = MagicMock()
+    node.p_durum = MagicMock()
+
+    node._map_maske = None
+    node._map_cozunurluk = 0.05
+    node._map_orijin = (0.0, 0.0, 0.0)
+    node._tf_map_uyarildi = False
+    node._lidar_tf_alindi = True
+    node._marker_yayinla = False
+    node._robot_pose_odom = (0.0, 0.0, 0.0)
+    node._robot_v_odom = (0.0, 0.0)
+    node._robot_wz = 0.0
+    node._odom_gecmisi = [(10.0, 0.0, 0.0, 0.0)]
+    node._son_scan_t = 10.0
+    node._son_scan_duvar_t = 10.0
+    node._son_gecerli_pose_t = 10.0
+    node._son_karar = 'serbest'
+    node._son_olcek = 1.0
+    node._son_gerekce = 'serbest'
+    node._onceki_gerekce = 'serbest'
+    node._son_kritik_iz = None
+    node._zaman_asimi_uyarildi = False
+    node._tarama_yok_uyarildi = False
+    node._odom_yok_uyarildi = False
+    node._simdi_s = lambda: 10.0
+
+    # 1. _map_cb ile harita gelmesi
+    map_msg = OccupancyGrid()
+    map_msg.info.width = 100
+    map_msg.info.height = 100
+    map_msg.info.resolution = 0.05
+    map_msg.info.origin.position.x = 0.0
+    map_msg.info.origin.position.y = 0.0
+
+    # x >= 3.0 m (col >= 60) olan yerleri 100 (dolu) yapalım
+    grid_data = np.zeros((100, 100), dtype=np.int8)
+    grid_data[:, 60:] = 100
+    map_msg.data = grid_data.flatten().tolist()
+
+    node._map_cb(map_msg)
+    assert node._map_maske is not None
+    assert node._map_maske.shape == (100, 100)
+    # Genişletilmiş maske 0.10 m (2 hücre) sola kayıp col 58'den itibaren True olmalı
+    assert np.all(node._map_maske[:, 58:])
+    assert not np.any(node._map_maske[:, :58])
+
+    # 2. _scan_cb sırasında TF map<-base_link hatası
+    node.tf_buffer.lookup_transform.side_effect = Exception("TF lookup failure")
+    scan_pts = np.array([[2.0, 0.0], [3.5, 0.0]])  # Biri serbest (x=2.0), diğeri duvarda (x=3.5)
+    filtered_no_tf = node._harita_noktalarini_filtrele(scan_pts, stamp=None)
+    # TF bulunamadığında çıkarım atlanır (noktalar aynen döner) ve bir kez uyarılır
+    assert len(filtered_no_tf) == 2
+    assert node._tf_map_uyarildi is True
+    assert node.get_logger().warn.call_count == 1
+
+    # İkinci çağrıda uyarı tekrar spam edilmez
+    node._harita_noktalarini_filtrele(scan_pts, stamp=None)
+    assert node.get_logger().warn.call_count == 1
+
+    # 3. TF başarıyla gelirse: duvardaki nokta (x_map=3.5 >= 3.0-0.10=2.90) elenir, serbest nokta kalır
+    mock_tf = MagicMock()
+    mock_tf.transform.translation.x = 0.0
+    mock_tf.transform.translation.y = 0.0
+    mock_tf.transform.rotation.x = 0.0
+    mock_tf.transform.rotation.y = 0.0
+    mock_tf.transform.rotation.z = 0.0
+    mock_tf.transform.rotation.w = 1.0
+    node.tf_buffer.lookup_transform.side_effect = None
+    node.tf_buffer.lookup_transform.return_value = mock_tf
+
+    filtered_with_tf = node._harita_noktalarini_filtrele(scan_pts, stamp=None)
+    assert len(filtered_with_tf) == 1
+    assert abs(filtered_with_tf[0, 0] - 2.0) < 1e-4
+    assert node._tf_map_uyarildi is False
+
+    # 4. harita_cikar = False iken filtreleme yapılmaz
+    node.harita_cikar = False
+    scan_msg = LaserScan()
+    scan_msg.header = Header()
+    scan_msg.header.stamp.sec = 10
+    scan_msg.header.stamp.nanosec = 0
+    scan_msg.angle_min = 0.0
+    scan_msg.angle_increment = 0.01
+    scan_msg.range_min = 0.1
+    scan_msg.range_max = 5.0
+    scan_msg.ranges = [2.0, 3.5]
+    node._scan_cb(scan_msg)
+    # Düğüm hatasız çalıştı ve harita çıkarımı uygulanmadı
+    assert node.harita_cikar is False
