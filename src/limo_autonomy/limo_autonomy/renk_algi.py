@@ -17,7 +17,9 @@ Algoritma Akışı:
   7. Derinlik nesnenin ön yüzeyidir; küre merkezi için nesne yarıçapı kadar (nesne_yaricap=0.035 m)
      ışın boyunca 3B uzayda ilerletilir.
   8. Nesne merkezinin 3B konumu PointStamped olarak /kavrama/nesne_algi konusuna,
-     görüş durumu ise /kavrama/nesne_algi_durum konusuna ('GORUYOR'/'GORMUYOR') yayınlanır.
+     görüş durumu ise /kavrama/nesne_algi_durum konusuna ('GORUYOR'/'GORMUYOR'/'KISMI') yayınlanır.
+     'KISMI' durumu: Lekenin sınırlayıcı kutusu görüntü kenarına kenar_payi_px kadar
+     yakınsa ölçüm yayınlanmaz ve kısmi görünüm durumu yayınlanır.
 """
 
 from __future__ import annotations
@@ -118,24 +120,31 @@ def hsv_maske(
 def en_buyuk_bilesen_filtrele(
     maske: np.ndarray,
     min_alan_px: int = 150,
-) -> tuple[np.ndarray, int]:
+    kutu_ver: bool = False,
+) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, tuple[int, int, int, int] | None]:
     """Maskedeki bağlı bileşenleri analiz eder ve en büyük bileşeni döndürür.
 
     min_alan_px değerinden küçük bileşenler elenir (küçük leke reddi).
 
+    Args:
+        maske: İkili maske görüntüsü.
+        min_alan_px: Asgari geçerli bileşen alanı.
+        kutu_ver: True ise (temiz_maske, alan, kutu), False ise (temiz_maske, alan) döner.
+
     Returns:
-        (temiz_maske, alan):
-            temiz_maske: Yalnızca en büyük bileşeni içeren ikili maske (0 veya 255).
-            alan: En büyük bileşenin piksel alanı (yoksa 0).
+        kutu_ver False ise (temiz_maske, alan),
+        kutu_ver True ise (temiz_maske, alan, kutu) burada kutu=(x, y, w, h).
     """
     if maske is None or maske.size == 0 or cv2.countNonZero(maske) == 0:
-        return np.zeros_like(maske) if maske is not None else np.empty((0, 0), dtype=np.uint8), 0
+        bos = np.zeros_like(maske) if maske is not None else np.empty((0, 0), dtype=np.uint8)
+        return (bos, 0, None) if kutu_ver else (bos, 0)
 
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(maske, connectivity=8)
 
     # 0 etiketi arka plandır, 1..num_labels-1 ön plan bileşenleridir.
     if num_labels <= 1:
-        return np.zeros_like(maske), 0
+        bos = np.zeros_like(maske)
+        return (bos, 0, None) if kutu_ver else (bos, 0)
 
     en_buyuk_alan = 0
     en_buyuk_idx = -1
@@ -147,11 +156,131 @@ def en_buyuk_bilesen_filtrele(
             en_buyuk_idx = i
 
     if en_buyuk_idx == -1:
-        return np.zeros_like(maske), 0
+        bos = np.zeros_like(maske)
+        return (bos, 0, None) if kutu_ver else (bos, 0)
 
     temiz = np.zeros_like(maske)
     temiz[labels == en_buyuk_idx] = 255
+
+    if kutu_ver:
+        kutu = (
+            int(stats[en_buyuk_idx, cv2.CC_STAT_LEFT]),
+            int(stats[en_buyuk_idx, cv2.CC_STAT_TOP]),
+            int(stats[en_buyuk_idx, cv2.CC_STAT_WIDTH]),
+            int(stats[en_buyuk_idx, cv2.CC_STAT_HEIGHT]),
+        )
+        return temiz, en_buyuk_alan, kutu
+
     return temiz, en_buyuk_alan
+
+
+def sinirlayici_kutu_bul(
+    maske: np.ndarray,
+    min_alan_px: int = 150,
+) -> tuple[int, int, int, int] | None:
+    """Maskedeki en büyük bağlı bileşenin sınırlayıcı kutusunu (x, y, w, h) döner."""
+    sonuc = en_buyuk_bilesen_filtrele(maske, min_alan_px=min_alan_px, kutu_ver=True)
+    _, alan, kutu = sonuc  # type: ignore[misc]
+    return kutu if alan >= min_alan_px else None
+
+
+def kenara_yakin_mi(
+    kutu: tuple[int, int, int, int],
+    goruntu_sekli: tuple[int, int] | Sequence[int] | np.ndarray,
+    kenar_payi_px: int = 4,
+) -> bool:
+    """Sınırlayıcı kutunun (x, y, w, h) görüntü kenarlarına kenar_payi_px kadar yakın olup olmadığını denetler.
+
+    Args:
+        kutu: (x, y, w, h) sınırlayıcı kutu piksel koordinatları.
+        goruntu_sekli: (yukseklik, genislik) / (genislik, yukseklik) veya görüntü dizisi.
+        kenar_payi_px: Kenara yakınlık emniyet payı (piksel).
+
+    Returns:
+        Kutu herhangi bir kenara kenar_payi_px kadar yakınsa True, değilse False.
+    """
+    if kutu is None or len(kutu) < 4:
+        return False
+    x, y, w, h = int(kutu[0]), int(kutu[1]), int(kutu[2]), int(kutu[3])
+
+    if hasattr(goruntu_sekli, 'shape'):
+        H, W = int(goruntu_sekli.shape[0]), int(goruntu_sekli.shape[1])
+    elif len(goruntu_sekli) >= 2:
+        d0, d1 = int(goruntu_sekli[0]), int(goruntu_sekli[1])
+        if d0 > d1:
+            W, H = d0, d1
+        else:
+            H, W = d0, d1
+    else:
+        raise ValueError(f'Geçersiz görüntü boyutu: {goruntu_sekli}')
+
+    pay = max(0, int(kenar_payi_px))
+
+    if x <= pay:
+        return True
+    if y <= pay:
+        return True
+    if (x + w) >= (W - pay):
+        return True
+    if (y + h) >= (H - pay):
+        return True
+    return False
+
+
+def gorunen_yaricap_px_hesapla(
+    alan: int | float = 0,
+    kutu: tuple[int, int, int, int] | None = None,
+) -> float:
+    """Lekenin piksel alanından veya sınırlayıcı kutusundan görünen yarıçapı hesaplar.
+
+    Daire için r = sqrt(alan / pi). Alan yoksa kutunun ortalama yarıçapı (w + h) / 4 alınır.
+    """
+    if alan > 0:
+        return math.sqrt(float(alan) / math.pi)
+    if kutu is not None and len(kutu) >= 4:
+        return float(kutu[2] + kutu[3]) / 4.0
+    return 0.0
+
+
+def fiziksel_yaricap_kestir(
+    gorunen_yaricap_px: float,
+    derinlik_m: float,
+    fx: float,
+) -> float:
+    """Görünen piksel yarıçapı, derinlik ve odak uzaklığından fiziksel yarıçapı kestirir.
+
+    r_fiziksel = r_px · derinlik / fx
+    """
+    if fx <= 0.0:
+        return 0.0
+    return float(gorunen_yaricap_px) * float(derinlik_m) / float(fx)
+
+
+def boyut_uygun_mu(
+    gorunen_yaricap_px: float,
+    derinlik_m: float,
+    fx: float,
+    beklenen_yaricap_m: float = 0.035,
+    tolerans_orani: float = 0.60,
+) -> bool:
+    """Kestirilen fiziksel yarıçapın beklenen yarıçap toleransı (±%60) içinde olup olmadığını denetler.
+
+    Args:
+        gorunen_yaricap_px: Görüntüdeki nesne yarıçapı (piksel).
+        derinlik_m: Nesne yüzeyine ölçülen derinlik mesafesi (m).
+        fx: Renk kamerası yatay odak uzaklığı (piksel).
+        beklenen_yaricap_m: Beklenen fiziksel yarıçap (m, varsayılan 0.035 m).
+        tolerans_orani: Kabul edilebilir azami bağıl sapma (varsayılan 0.60, yani ±%60).
+
+    Returns:
+        Kestirilen boyut beklenen aralıktaysa True, tutarsızsa False.
+    """
+    if fx <= 0.0 or derinlik_m <= 0.0 or gorunen_yaricap_px <= 0.0:
+        return False
+    r_kestirilen = gorunen_yaricap_px * derinlik_m / fx
+    r_min = beklenen_yaricap_m * (1.0 - tolerans_orani)
+    r_max = beklenen_yaricap_m * (1.0 + tolerans_orani)
+    return r_min <= r_kestirilen <= r_max
 
 
 def maske_bul(
@@ -163,7 +292,8 @@ def maske_bul(
     min_alan_px: int = 150,
     rgb_mi: bool = False,
     morfoloji_kernel: int = 3,
-) -> tuple[np.ndarray, int]:
+    kutu_ver: bool = False,
+) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, tuple[int, int, int, int] | None]:
     """Renk görüntüsünden kırmızı nesne maskesini ve alanını bulur."""
     ham_maske = hsv_maske(
         goruntu,
@@ -174,7 +304,7 @@ def maske_bul(
         rgb_mi=rgb_mi,
         morfoloji_kernel=morfoloji_kernel,
     )
-    return en_buyuk_bilesen_filtrele(ham_maske, min_alan_px=min_alan_px)
+    return en_buyuk_bilesen_filtrele(ham_maske, min_alan_px=min_alan_px, kutu_ver=kutu_ver)
 
 
 def merkez_bul(
@@ -543,6 +673,11 @@ class RenkAlgiDugumu(Node):
         p('cerceve', 'camera_color_optical_frame')
         p('derinlik_cerceve', 'camera_depth_optical_frame')
 
+        # N17: Kenar payı ve boyut denetimi parametreleri
+        p('kenar_payi_px', 4)
+        p('beklenen_yaricap_m', 0.035)
+        p('boyut_denetimi', True)
+
         p('renk_topic', '/camera/color/image_raw')
         p('renk_info_topic', '/camera/color/camera_info')
         p('derinlik_topic', '/camera/depth/image_raw')
@@ -556,6 +691,7 @@ class RenkAlgiDugumu(Node):
         self.son_derinlik_info: CameraInfo | None = None
         self.son_derinlik_msg: Image | None = None
         self.goruyor: bool = False
+        self.durum: str = 'GORMUYOR'
         self.son_islem_zamani = self.get_clock().now()
 
         # TF2 Dinleyicisi
@@ -609,8 +745,7 @@ class RenkAlgiDugumu(Node):
         self.son_derinlik_msg = msg
 
     def _durum_dongusu(self) -> None:
-        durum_str = 'GORUYOR' if self.goruyor else 'GORMUYOR'
-        self.pub_durum.publish(String(data=durum_str))
+        self.pub_durum.publish(String(data=self.durum))
 
     def _tf_renk_derinlik_al(self) -> np.ndarray:
         """TF ağacından veya fabrika varsayılanından renk->derinlik optik dönüşümünü çeker."""
@@ -659,6 +794,7 @@ class RenkAlgiDugumu(Node):
         except Exception as e:
             self.get_logger().warn(f'Renk goruntu mesaji cozumlenemedi: {e}')
             self.goruyor = False
+            self.durum = 'GORMUYOR'
             return
 
         hsv_alt = list(self.get_parameter('hsv_alt').value)
@@ -670,31 +806,46 @@ class RenkAlgiDugumu(Node):
         hata_ayiklama = bool(self.get_parameter('hata_ayiklama').value)
         pencere_boyut = int(self.get_parameter('pencere_boyut').value)
         cerceve = str(self.get_parameter('cerceve').value)
+        kenar_payi_px = int(self.get_parameter('kenar_payi_px').value)
+        beklenen_yaricap_m = float(self.get_parameter('beklenen_yaricap_m').value)
+        boyut_denetimi = bool(self.get_parameter('boyut_denetimi').value)
 
-        # 1. Renk maskesi ve en büyük bileşen
-        mask, alan = maske_bul(
+        # 1. Renk maskesi, en büyük bileşen ve sınırlayıcı kutu
+        mask, alan, kutu = maske_bul(
             bgr,
             hsv_alt=hsv_alt,
             hsv_ust=hsv_ust,
             hsv_alt2=hsv_alt2,
             hsv_ust2=hsv_ust2,
             min_alan_px=min_alan_px,
+            kutu_ver=True,
         )
 
         merkez = merkez_bul(mask, min_alan_px=min_alan_px)
 
-        if merkez is None:
+        if merkez is None or kutu is None:
             self.goruyor = False
+            self.durum = 'GORMUYOR'
             if hata_ayiklama:
                 self._hata_ayiklama_yayinla(bgr, mask, None, None, renk_msg.header)
             return
 
         cx, cy = merkez
 
+        # Kenar denetimi: leke sınırlayıcı kutusu görüntü kenarına kenar_payi_px kadar yakınsa
+        # kısmi görünüm sayılır; ölçüm yayınlanmaz ve durum 'KISMI' bildirilir.
+        if kenara_yakin_mi(kutu, bgr.shape[:2], kenar_payi_px=kenar_payi_px):
+            self.goruyor = False
+            self.durum = 'KISMI'
+            if hata_ayiklama:
+                self._hata_ayiklama_yayinla(bgr, mask, (cx, cy), None, renk_msg.header)
+            return
+
         # 2. Derinlik görüntüsü denetimi
         if self.son_derinlik_msg is None:
             self.get_logger().debug('Derinlik goruntusu henuz alinmadi')
             self.goruyor = False
+            self.durum = 'GORMUYOR'
             if hata_ayiklama:
                 self._hata_ayiklama_yayinla(bgr, mask, (cx, cy), None, renk_msg.header)
             return
@@ -704,6 +855,7 @@ class RenkAlgiDugumu(Node):
         except Exception as e:
             self.get_logger().warn(f'Derinlik goruntusu cozumlenemedi: {e}')
             self.goruyor = False
+            self.durum = 'GORMUYOR'
             return
 
         # İç parametreleri al (varsayılan yedekli)
@@ -743,9 +895,28 @@ class RenkAlgiDugumu(Node):
 
         if d_medyan is None or d_medyan <= 0.05:
             self.goruyor = False
+            self.durum = 'GORMUYOR'
             if hata_ayiklama:
                 self._hata_ayiklama_yayinla(bgr, mask, (cx, cy), None, renk_msg.header)
             return
+
+        # Boyut denetimi: derinlik penceresi medyanı ile leke boyutunun tutarlılığı
+        # (görünen yarıçap_px · derinlik / fx ile kestirilen fiziksel yarıçap, beklenen ±%60 dışında ise reddet)
+        if boyut_denetimi:
+            fx, _, _, _ = k_ayristir(k_renk)
+            r_px = gorunen_yaricap_px_hesapla(alan, kutu)
+            if not boyut_uygun_mu(
+                r_px, d_medyan, fx, beklenen_yaricap_m=beklenen_yaricap_m, tolerans_orani=0.60
+            ):
+                self.get_logger().debug(
+                    f'Boyut tutarsiz: r_px={r_px:.1f}, d={d_medyan:.3f}m, '
+                    f'r_kestirilen={(r_px * d_medyan / fx):.4f}m, beklenen={beklenen_yaricap_m:.4f}m'
+                )
+                self.goruyor = False
+                self.durum = 'GORMUYOR'
+                if hata_ayiklama:
+                    self._hata_ayiklama_yayinla(bgr, mask, (cx, cy), None, renk_msg.header)
+                return
 
         # 4. Renk ışını ve 3B konum kestirimi (kamera renk optik çerçevesinde)
         isin = piksel_isin(cx, cy, k_renk, birim=True)
@@ -763,6 +934,7 @@ class RenkAlgiDugumu(Node):
 
         self.pub_algi.publish(algi_msg)
         self.goruyor = True
+        self.durum = 'GORUYOR'
 
         if hata_ayiklama:
             self._hata_ayiklama_yayinla(
@@ -801,11 +973,21 @@ class RenkAlgiDugumu(Node):
                     gorsel, etiket, (cx + 12, cy - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2
                 )
+            elif self.durum == 'KISMI':
+                cv2.putText(
+                    gorsel, 'KISMI GORUNUM (KENAR REDDI)', (cx + 12, cy - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2
+                )
             else:
                 cv2.putText(
                     gorsel, 'Derinlik Yok', (cx + 12, cy - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2
                 )
+        elif self.durum == 'KISMI':
+            cv2.putText(
+                gorsel, 'KISMI GORUNUM (KENAR REDDI)', (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2
+            )
         else:
             cv2.putText(
                 gorsel, 'NESNE BULUNAMADI', (20, 40),

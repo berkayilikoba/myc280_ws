@@ -457,3 +457,111 @@ def test_olcum_kesilmesi_0_2m_tamam_0_4m_hata():
     assert durum_40cm.startswith('HATA'), f"0.40 m'de kesilme HATA vermeliydi, alınan: {durum_40cm}"
     assert 'zaman_asimi' in durum_40cm
 
+
+def test_dondurma_rho_kucuk_sicrama_hata_uretmez():
+    """(1) rho<0.25'te gelen 3 adet 0.5 m sıçramalı ölçüm HATA:sapma ÜRETMEZ ve komut hedefe doğru sürer."""
+    ayar = SonYaklasmaAyar(olcumsuz_mesafe=0.25, sapma_esik=0.15, aykiri_kabul_sayisi=3)
+    # Hedef nesne (0.40, 0.0), yaklasma_yaw=0.0 -> P = (0.40 - 0.22, 0.0) = (0.18, 0.0)
+    # Robot (0.0, 0.0, 0.0)'da iken rho = 0.18 m (< 0.25 m)
+    denetleyici = SonYaklasma(ayar=ayar, yaklasma_yaw_odom=0.0)
+
+    # İlk geçerli ölçüm: nesne robotun önünde 0.40 m'de
+    v0, w0, durum0, bilgi0 = denetleyici.adim(
+        robot_odom_pose=(0.0, 0.0, 0.0),
+        t=0.0,
+        olcum_robot_xy=(0.40, 0.0),
+    )
+    assert durum0 in ('YAKLASIYOR', 'DONUYOR')
+    assert bilgi0['rho'] < 0.25
+    assert bilgi0['tahmin_donduruldu'] is True
+    assert v0 > 0.0
+
+    # 3 adet 0.50 m sıçramalı aykırı ölçüm gönderelim (nesne 0.40 -> 0.90 m sıçradı)
+    for i in range(1, 4):
+        v, w, durum, bilgi = denetleyici.adim(
+            robot_odom_pose=(0.0, 0.0, 0.0),
+            t=0.1 * i,
+            olcum_robot_xy=(0.90, 0.0),  # 0.50 m sıçrama
+        )
+        assert durum != 'HATA:sapma'
+        assert durum in ('YAKLASIYOR', 'DONUYOR')
+        assert v > 0.0
+        assert bilgi['tahmin_donduruldu'] is True
+        # Tahmin dondurulduğu için nesne odom konumu sıçramaz, korunur
+        assert bilgi['nesne_odom'][0] == pytest.approx(0.40, abs=1e-4)
+
+
+def test_dondurma_rho_buyuk_sicrama_hata_sapma_uretir():
+    """(2) rho>0.25'te aynı dizi (3 adet 0.5 m sıçrama) hâlâ HATA:sapma üretir (mevcut davranış korunur)."""
+    ayar = SonYaklasmaAyar(olcumsuz_mesafe=0.25, sapma_esik=0.15, aykiri_kabul_sayisi=3)
+    # Hedef nesne (0.60, 0.0), yaklasma_yaw=0.0 -> P = (0.60 - 0.22, 0.0) = (0.38, 0.0)
+    # Robot (0.0, 0.0, 0.0)'da iken rho = 0.38 m (> 0.25 m)
+    denetleyici = SonYaklasma(ayar=ayar, yaklasma_yaw_odom=0.0)
+
+    # İlk geçerli ölçüm: nesne robotun önünde 0.60 m'de
+    v0, w0, durum0, bilgi0 = denetleyici.adim(
+        robot_odom_pose=(0.0, 0.0, 0.0),
+        t=0.0,
+        olcum_robot_xy=(0.60, 0.0),
+    )
+    assert durum0 in ('YAKLASIYOR', 'DONUYOR')
+    assert bilgi0['rho'] > 0.25
+    assert bilgi0['tahmin_donduruldu'] is False
+
+    # 1. ve 2. sıçramalı ölçüm (reddedilir)
+    for i in (1, 2):
+        v, w, durum, bilgi = denetleyici.adim(
+            robot_odom_pose=(0.0, 0.0, 0.0),
+            t=0.1 * i,
+            olcum_robot_xy=(1.10, 0.0),  # 0.50 m sıçrama
+        )
+        assert durum != 'HATA:sapma'
+        assert bilgi['tahmin_donduruldu'] is False
+
+    # 3. sıçramalı ölçüm: aykırı kabul eşiği dolduğunda sapma_esik (0.15 m) aşıldığı için HATA:sapma üretir
+    v3, w3, durum3, bilgi3 = denetleyici.adim(
+        robot_odom_pose=(0.0, 0.0, 0.0),
+        t=0.3,
+        olcum_robot_xy=(1.10, 0.0),
+    )
+    assert durum3 == 'HATA:sapma'
+    assert v3 == 0.0
+    assert w3 == 0.0
+
+
+def test_renk_algi_kenar_ve_boyut_reddi():
+    """(3) renk_algi kenar ve boyut reddi işlevleri doğrulanır."""
+    from limo_autonomy.renk_algi import boyut_uygun_mu, kenara_yakin_mi
+
+    # Kenar reddi: alt kenara (720 px) 4 px veya daha yakın sınırlayıcı kutu
+    kutu_alt = (600, 717, 40, 3)  # y + h = 720 >= 716
+    assert kenara_yakin_mi(kutu_alt, (720, 1280), kenar_payi_px=4)
+
+    # Ortadaki kutu kenara yakın değildir
+    kutu_orta = (600, 300, 40, 40)
+    assert not kenara_yakin_mi(kutu_orta, (720, 1280), kenar_payi_px=4)
+
+    # Boyut reddi: derinlik penceresi arka plana düşünce (örn. 0.70 m yerine 0.20 m)
+    fx = 908.97
+    r_px_beklenen = 0.035 * fx / 0.20
+    assert not boyut_uygun_mu(r_px_beklenen, derinlik_m=0.70, fx=fx, beklenen_yaricap_m=0.035)
+    assert boyut_uygun_mu(r_px_beklenen, derinlik_m=0.20, fx=fx, beklenen_yaricap_m=0.035)
+
+
+def test_nesne_tahmini_aykiri_kabul_sayisi_parametresi():
+    """NesneTahmini'nde aykiri_kabul_sayisi parametresinin davranışı test edilir."""
+    # aykiri_kabul_sayisi = 4 olarak ayarlandığında 3 ardışık aykırı yetersiz kalmalı, 4.'de kabul edilmeli
+    tahmin = NesneTahmini(alfa=0.4, esik_aykiri=0.10, aykiri_kabul_sayisi=4)
+    assert tahmin.guncelle((1.0, 1.0), t=0.0) is True
+
+    # 1, 2 ve 3. aykırılar reddedilmeli
+    assert tahmin.guncelle((2.0, 1.0), t=0.1) is False
+    assert tahmin.guncelle((2.0, 1.0), t=0.2) is False
+    assert tahmin.guncelle((2.0, 1.0), t=0.3) is False
+    assert tahmin.konum == (1.0, 1.0)
+
+    # 4. aykırıda kabul edilmeli
+    assert tahmin.guncelle((2.0, 1.0), t=0.4) is True
+    assert tahmin.konum == (2.0, 1.0)
+
+

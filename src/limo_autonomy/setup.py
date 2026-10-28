@@ -27,5 +27,6 @@ setup(
         'gorev = limo_autonomy.gorev_dugumu:main',
         'kavrama_gorsel = limo_autonomy.kavrama_gorsel:main',
         'renk_algi = limo_autonomy.renk_algi:main',
+        'hareketli_kalkan = limo_autonomy.hareketli_kalkan:main',
     ]},
 )

@@ -8,18 +8,23 @@ import numpy as np
 import pytest
 
 from limo_autonomy.renk_algi import (
+    boyut_uygun_mu,
     derinlik_medyan_al,
     en_buyuk_bilesen_filtrele,
+    fiziksel_yaricap_kestir,
+    gorunen_yaricap_px_hesapla,
     goruntu_mesajindan_numpy,
     hsv_maske,
     isin_derinlik_3b,
     k_ayristir,
+    kenara_yakin_mi,
     maske_bul,
     merkez_bul,
     numpy_dan_goruntu_mesaji,
     piksel_isin,
     quaternion_dan_rotasyon_matrisi,
     renk_derinlik_esle,
+    sinirlayici_kutu_bul,
 )
 
 
@@ -314,3 +319,125 @@ def test_goruntu_mesaj_donusumleri():
 
     geri_arr = goruntu_mesajindan_numpy(msg)
     np.testing.assert_array_equal(sentetik_bgr, geri_arr)
+
+
+# ==============================================================================
+# 6. Kenar Payı ve Boyut Denetimi Testleri (N17)
+# ==============================================================================
+
+def test_kenara_yakin_mi_dort_kenar():
+    """Lekenin sınırlayıcı kutusunun 4 kenara yakınlık durumları test edilir."""
+    goruntu_sekli = (720, 1280)
+    pay = 4
+
+    # 1. Ortada nesne: kenara yakın değil
+    kutu_ortada = (600, 300, 50, 50)
+    assert not kenara_yakin_mi(kutu_ortada, goruntu_sekli, kenar_payi_px=pay)
+
+    # 2. Sol kenara yakın (x <= 4)
+    kutu_sol = (3, 300, 50, 50)
+    assert kenara_yakin_mi(kutu_sol, goruntu_sekli, kenar_payi_px=pay)
+    kutu_sol_sinir = (4, 300, 50, 50)
+    assert kenara_yakin_mi(kutu_sol_sinir, goruntu_sekli, kenar_payi_px=pay)
+    kutu_sol_guvenli = (5, 300, 50, 50)
+    assert not kenara_yakin_mi(kutu_sol_guvenli, goruntu_sekli, kenar_payi_px=pay)
+
+    # 3. Üst kenara yakın (y <= 4)
+    kutu_ust = (600, 2, 50, 50)
+    assert kenara_yakin_mi(kutu_ust, goruntu_sekli, kenar_payi_px=pay)
+    kutu_ust_sinir = (600, 4, 50, 50)
+    assert kenara_yakin_mi(kutu_ust_sinir, goruntu_sekli, kenar_payi_px=pay)
+
+    # 4. Sağ kenara yakın (x + w >= 1280 - 4 = 1276)
+    kutu_sag = (1230, 300, 50, 50)  # x + w = 1280 >= 1276
+    assert kenara_yakin_mi(kutu_sag, goruntu_sekli, kenar_payi_px=pay)
+    kutu_sag_sinir = (1226, 300, 50, 50)  # 1276
+    assert kenara_yakin_mi(kutu_sag_sinir, goruntu_sekli, kenar_payi_px=pay)
+    kutu_sag_guvenli = (1225, 300, 50, 50)  # 1275 < 1276
+    assert not kenara_yakin_mi(kutu_sag_guvenli, goruntu_sekli, kenar_payi_px=pay)
+
+    # 5. Alt kenara yakın (N17 vakası: elma alt kenara giriyor: y + h >= 720 - 4 = 716)
+    kutu_alt = (600, 670, 50, 50)  # y + h = 720 >= 716
+    assert kenara_yakin_mi(kutu_alt, goruntu_sekli, kenar_payi_px=pay)
+    kutu_alt_sinir = (600, 666, 50, 50)  # 716
+    assert kenara_yakin_mi(kutu_alt_sinir, goruntu_sekli, kenar_payi_px=pay)
+    kutu_alt_guvenli = (600, 665, 50, 50)  # 715 < 716
+    assert not kenara_yakin_mi(kutu_alt_guvenli, goruntu_sekli, kenar_payi_px=pay)
+
+    # numpy dizisi veya (W, H) tuple formatları ile çağrım desteği
+    img_sentetik = np.zeros((720, 1280, 3), dtype=np.uint8)
+    assert kenara_yakin_mi(kutu_alt, img_sentetik, kenar_payi_px=pay)
+    assert kenara_yakin_mi(kutu_alt, (1280, 720), kenar_payi_px=pay)
+
+
+def test_boyut_uygun_mu_tutarlilik_ve_aykiri_reddi():
+    """Leke boyutu ve derinlik tutarlılığı denetimi (beklenen 0.035 m ±%60)."""
+    fx = 908.97  # D435 renk kamerası odak uzaklığı
+    beklenen_r = 0.035  # elma yarıçapı: 3.5 cm
+
+    # İdeal durum: d = 0.50 m, r = 0.035 m -> r_px = 0.035 * 908.97 / 0.50 = 63.63 px
+    r_px_ideal = beklenen_r * fx / 0.50
+    assert boyut_uygun_mu(r_px_ideal, derinlik_m=0.50, fx=fx, beklenen_yaricap_m=beklenen_r)
+    kestirilen = fiziksel_yaricap_kestir(r_px_ideal, 0.50, fx)
+    assert kestirilen == pytest.approx(0.035, abs=1e-4)
+
+    # %50 sapma (tolerans ±%60 içinde, kabul edilmeli)
+    assert boyut_uygun_mu(r_px_ideal * 1.5, derinlik_m=0.50, fx=fx, beklenen_yaricap_m=beklenen_r)
+    assert boyut_uygun_mu(r_px_ideal * 0.5, derinlik_m=0.50, fx=fx, beklenen_yaricap_m=beklenen_r)
+
+    # N17 vakası: elma kesildiği için derinlik penceresi arka plana/zemine düşüyor
+    # Derinlik 0.20 m yerine 0.70 m ölçülüyor (3.5 kat büyük)
+    # r_kestirilen = r_px * 0.70 / fx = 0.035 * (0.70 / 0.20) = 0.1225 m >> 0.056 m -> REDDEDİLMELİ
+    r_px_yakin = beklenen_r * fx / 0.20
+    d_hatali = 0.70
+    assert not boyut_uygun_mu(r_px_yakin, derinlik_m=d_hatali, fx=fx, beklenen_yaricap_m=beklenen_r)
+
+    # Aşırı küçük kestirim reddedilmeli
+    assert not boyut_uygun_mu(10.0, derinlik_m=0.20, fx=fx, beklenen_yaricap_m=beklenen_r)
+
+
+def test_sinirlayici_kutu_ve_gorunen_yaricap_sentetik():
+    """Sentetik kırmızı daire ile sınırlayıcı kutu ve görünen yarıçap hesaplaması doğrulanır."""
+    img = np.zeros((720, 1280, 3), dtype=np.uint8)
+    cx, cy, r = 640, 360, 30
+    cv2.circle(img, (cx, cy), r, (0, 0, 255), thickness=-1)
+
+    sonuc = maske_bul(img, min_alan_px=150, kutu_ver=True)
+    mask, alan, kutu = sonuc  # type: ignore[misc]
+    assert kutu is not None
+    x, y, w, h = kutu
+    assert x == pytest.approx(cx - r, abs=2)
+    assert y == pytest.approx(cy - r, abs=2)
+    assert w == pytest.approx(2 * r, abs=2)
+    assert h == pytest.approx(2 * r, abs=2)
+
+    r_px = gorunen_yaricap_px_hesapla(alan, kutu)
+    assert r_px == pytest.approx(r, abs=1.5)
+    assert not kenara_yakin_mi(kutu, img.shape[:2], kenar_payi_px=4)
+
+    # Alt kenara yapışık daire
+    img_alt = np.zeros((720, 1280, 3), dtype=np.uint8)
+    cv2.circle(img_alt, (640, 710), 20, (0, 0, 255), thickness=-1)
+    sonuc_alt = maske_bul(img_alt, min_alan_px=150, kutu_ver=True)
+    _, _, kutu_alt = sonuc_alt  # type: ignore[misc]
+    assert kutu_alt is not None
+    assert kenara_yakin_mi(kutu_alt, img_alt.shape[:2], kenar_payi_px=4)
+
+
+def test_en_buyuk_bilesen_filtrele_kutu_ver_secenegi():
+    """kutu_ver parametresinin geriye dönük uyumluluğu ve 3'lü demet üretimi test edilir."""
+    mask = np.zeros((100, 100), dtype=np.uint8)
+    mask[20:40, 30:60] = 255  # 20x30 alan = 600 px
+
+    # kutu_ver=False: 2 elemanlı demet (temiz, alan)
+    temiz, alan = en_buyuk_bilesen_filtrele(mask, min_alan_px=150, kutu_ver=False)
+    assert alan == 600
+    assert isinstance(temiz, np.ndarray)
+
+    # kutu_ver=True: 3 elemanlı demet (temiz, alan, kutu)
+    sonuc = en_buyuk_bilesen_filtrele(mask, min_alan_px=150, kutu_ver=True)
+    assert len(sonuc) == 3
+    temiz3, alan3, kutu3 = sonuc  # type: ignore[misc]
+    assert alan3 == 600
+    assert kutu3 == (30, 20, 30, 20)
+    assert sinirlayici_kutu_bul(mask, min_alan_px=150) == (30, 20, 30, 20)
