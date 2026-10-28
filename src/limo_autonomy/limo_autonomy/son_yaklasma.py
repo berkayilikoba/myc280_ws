@@ -54,7 +54,11 @@ class SonYaklasmaAyar:
     # Görüş koruma parametreleri
     gorus_yari_aci: float = math.radians(35.0)  # kamera yatay görüş yarı açısı (rad, varsayılan 35°)
     gorus_payi: float = math.radians(10.0)      # görüş koruma emniyet payı (rad, varsayılan 10°)
-    olcumsuz_mesafe: float = 0.25               # bu mesafenin altında ölçüm kesilse de odomla devam et (m)
+    olcumsuz_mesafe: float = 0.25               # bu mesafenin altında nesne tahmini dondurulur (m)
+    # Ölçüm kaybının tolere edildiği mesafe (m): D435 zemindeki küçük nesneyi robot merkezine ~0.53 m'den yakında
+    # görüntünün alt kenarında kaybediyor (sim, elma r=0.035) → P'ye rho≈0.31 m. Bu mesafenin altında ölçüm
+    # kesilirse son tahminle odomla devam edilir (kayma %1-2 → <1 cm).
+    kayip_tolerans_mesafe: float = 0.40
 
     def __post_init__(self) -> None:
         """Astolfi kutupsal denetleyici kazançlarının asimptotik kararlılık koşullarını doğrular."""
@@ -318,9 +322,10 @@ class SonYaklasma:
         e_yanal = -dx * s_g + dy * c_g
 
         # Ölçüm kaybı ve zaman aşımı kontrolü:
-        # olcumsuz_mesafe içinde (varsayılan 0.25 m) ölçüm kaybı tolere edilir (kamera kör noktası; odomla tamamlanır).
+        # kayip_tolerans_mesafe içinde (vars. 0.40 m) ölçüm kaybı tolere edilir (kamera kör noktası; odomla tamamlanır).
         olcum_yasi = self.nesne_tahmin.yas(t)
-        if olcum_yasi > self.ayar.olcum_zaman_asimi and rho > self.ayar.olcumsuz_mesafe:
+        tolerans = max(self.ayar.olcumsuz_mesafe, self.ayar.kayip_tolerans_mesafe)
+        if olcum_yasi > self.ayar.olcum_zaman_asimi and rho > tolerans:
             self.onceki_v = 0.0
             bilgi = self._bilgi(
                 rho=rho,

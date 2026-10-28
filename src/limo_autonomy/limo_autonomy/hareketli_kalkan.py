@@ -45,7 +45,7 @@ Humble collision_monitor'dan Temel Farkları:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import Any, Sequence
 
@@ -85,6 +85,97 @@ def yaw_q(q: Any) -> float:
 def wrap(aci: float) -> float:
     """Açıyı (-pi, pi] aralığına sarar."""
     return math.atan2(math.sin(aci), math.cos(aci))
+
+
+def poz_aradeger(
+    gecmis: Sequence[tuple[float, float, float, float]],
+    t: float,
+    maks_dt: float = 0.2,
+) -> tuple[float, float, float] | None:
+    """Verilen t anındaki robot pozunu (x, y, yaw) odom geçmişinden doğrusal aradeğerle hesaplar.
+
+    Parametreler:
+        gecmis: Zaman damgasına göre sıralı [(t, x, y, yaw), ...] geçmiş tamponu.
+        t: Hedef zaman damgası (saniye).
+        maks_dt: En yakın ölçümden izin verilen azami zaman farkı (s, varsayılan 0.2).
+
+    Döndürür:
+        (x, y, yaw) pozu. Tampon boşsa veya hedef an en yakın kayıttan maks_dt'den
+        daha uzaksa None döner.
+    """
+    if not gecmis:
+        return None
+
+    t_val = float(t)
+    t_ilk = float(gecmis[0][0])
+    t_son = float(gecmis[-1][0])
+
+    # Hedef zaman tamponun öncesindeyse: en yakını kullan veya None dön
+    if t_val < t_ilk:
+        if (t_ilk - t_val) > float(maks_dt):
+            return None
+        return (float(gecmis[0][1]), float(gecmis[0][2]), float(gecmis[0][3]))
+
+    # Hedef zaman tamponun sonrasındaysa: en yakını kullan veya None dön
+    if t_val > t_son:
+        if (t_val - t_son) > float(maks_dt):
+            return None
+        return (float(gecmis[-1][1]), float(gecmis[-1][2]), float(gecmis[-1][3]))
+
+    # Hedef zaman tampon aralığında: iki komşu kayıt arasında doğrusal aradeğer
+    n = len(gecmis)
+    for i in range(n - 1):
+        t0 = float(gecmis[i][0])
+        t1 = float(gecmis[i + 1][0])
+        if t0 <= t_val <= t1:
+            if min(t_val - t0, t1 - t_val) > float(maks_dt):
+                return None
+
+            dt = t1 - t0
+            if dt <= 1e-9:
+                return (float(gecmis[i][1]), float(gecmis[i][2]), float(gecmis[i][3]))
+
+            alpha = (t_val - t0) / dt
+            x0, y0, yaw0 = float(gecmis[i][1]), float(gecmis[i][2]), float(gecmis[i][3])
+            x1, y1, yaw1 = float(gecmis[i + 1][1]), float(gecmis[i + 1][2]), float(gecmis[i + 1][3])
+
+            x = x0 + alpha * (x1 - x0)
+            y = y0 + alpha * (y1 - y0)
+            dyaw = wrap(yaw1 - yaw0)
+            yaw = wrap(yaw0 + alpha * dyaw)
+            return (float(x), float(y), float(yaw))
+
+    return (float(gecmis[-1][1]), float(gecmis[-1][2]), float(gecmis[-1][3]))
+
+
+def yon_tutarliligi(ham_hizlar: Sequence[tuple[float, float]], son_n: int = 5) -> float:
+    """Son N ham hız ölçümünün ortalama birim vektörünün uzunluğunu hesaplar.
+
+    Parametreler:
+        ham_hizlar: İzin ham hız ölçümleri listesi [(vx, vy), ...].
+        son_n: Değerlendirilecek son ölçüm sayısı (varsayılan 5).
+
+    Döndürür:
+        Birim vektörlerin ortalamasının büyüklüğü (0.0 - 1.0).
+        Ölçümler aynı yöndeyse 1.0'a yakındır; yön rastgele dağılmışsa 0.0'a yakındır.
+    """
+    if not ham_hizlar:
+        return 0.0
+
+    olcumler = ham_hizlar[-son_n:]
+    if not olcumler:
+        return 0.0
+
+    ux_sum = 0.0
+    uy_sum = 0.0
+    for vx, vy in olcumler:
+        v = math.hypot(vx, vy)
+        if v > 1e-6:
+            ux_sum += vx / v
+            uy_sum += vy / v
+
+    n = len(olcumler)
+    return math.hypot(ux_sum / n, uy_sum / n)
 
 
 def tarama_noktalari(
@@ -229,6 +320,11 @@ class Iz:
     yas: int = 1
     t_ilk: float = 0.0
     t_son: float = 0.0
+    ham_hizlar: list[tuple[float, float]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.ham_hizlar and (self.vx != 0.0 or self.vy != 0.0):
+            self.ham_hizlar = [(self.vx, self.vy)]
 
     @property
     def yaricap(self) -> float:
@@ -252,6 +348,13 @@ class Iz:
     def hiz_vektoru(self) -> tuple[float, float]:
         return (self.vx, self.vy)
 
+    @property
+    def iz_yasi_s(self) -> float:
+        """İzin saniye cinsinden yaşı."""
+        if self.t_son > self.t_ilk:
+            return self.t_son - self.t_ilk
+        return max(0.0, float(self.yas) * 0.1)
+
     def __getitem__(self, key: Any) -> Any:
         if isinstance(key, int):
             return (self.x, self.y, self.vx, self.vy, self.r)[key]
@@ -264,8 +367,10 @@ class IzTakipci:
     """Odom çerçevesindeki küme merkezlerini takip eden ve hız kestiren izleyici.
 
     Özellikler:
-        - En yakın komşu eşleme (kapı: 0.35 m).
-        - Üstel yumuşatılmış hız kestirimi (alfa: 0.4).
+        - Öngörülen konum (x + vx*dt) tabanlı en yakın komşu eşleme (kapı: 0.35 m).
+        - Belirsiz eşleşmelerde (>=2 aday küme veya >=2 aday iz) hızı ve görülmeyi sıfırlama.
+        - Robot dönüş hızı |wz| > maks_donus_hizi iken hız güncellemesini atlama (konumu güncelle, hızı koru).
+        - Üstel yumuşatılmış hız kestirimi (alfa: 0.4) ve ham hız geçmişi takibi.
         - Yaş ve görülme sayısı takibi.
         - 0.5 s boyunca görülmeyen izlerin temizlenmesi.
     """
@@ -275,10 +380,12 @@ class IzTakipci:
         kapi: float = 0.35,
         alfa: float = 0.4,
         silme_suresi: float = 0.5,
+        maks_donus_hizi: float = 0.8,
     ) -> None:
         self.kapi: float = float(kapi)
         self.alfa: float = float(alfa)
         self.silme_suresi: float = float(silme_suresi)
+        self.maks_donus_hizi: float = float(maks_donus_hizi)
         self._izler: list[Iz] = []
         self._sonraki_id: int = 1
 
@@ -292,6 +399,7 @@ class IzTakipci:
         merkezler_odom: Sequence[tuple[float, float]] | np.ndarray,
         yaricaplar: Sequence[float],
         t: float,
+        robot_wz: float = 0.0,
     ) -> None:
         """Yeni küme merkezleriyle izleri günceller.
 
@@ -299,9 +407,11 @@ class IzTakipci:
             merkezler_odom: Odom çerçevesindeki [(ox, oy), ...] merkez listesi.
             yaricaplar: Her kümenin yarıçapı [r, ...].
             t: Güncelleme zamanı (saniye).
+            robot_wz: Robotun anlık açısal hızı (rad/s, varsayılan 0.0).
         """
         t_val = float(t)
         n_kume = len(merkezler_odom)
+        hiz_guncelle_atla = abs(float(robot_wz)) > self.maks_donus_hizi
 
         if len(self._izler) == 0:
             # Henüz iz yoksa tüm kümeleri yeni iz olarak ekle
@@ -319,24 +429,47 @@ class IzTakipci:
                     yas=1,
                     t_ilk=t_val,
                     t_son=t_val,
+                    ham_hizlar=[],
                 )
                 self._sonraki_id += 1
                 self._izler.append(yeni_iz)
             return
 
-        # Eşleme için mesafe matrisi oluştur
+        # 1. Eşleştirmede izin öngörülen konumunu (x + vx*dt) kullan
         kapi_kare = self.kapi * self.kapi
         ciftler: list[tuple[float, int, int]] = []
+        iz_adaylari: dict[int, list[int]] = {i: [] for i in range(len(self._izler))}
+        kume_adaylari: dict[int, list[int]] = {j: [] for j in range(n_kume)}
 
         for i, iz in enumerate(self._izler):
+            dt_ongoru = max(0.0, t_val - iz.t_son)
+            pred_x = iz.x + iz.vx * dt_ongoru
+            pred_y = iz.y + iz.vy * dt_ongoru
+
             for j in range(n_kume):
-                dx = iz.x - float(merkezler_odom[j][0])
-                dy = iz.y - float(merkezler_odom[j][1])
+                cx = float(merkezler_odom[j][0])
+                cy = float(merkezler_odom[j][1])
+                dx = pred_x - cx
+                dy = pred_y - cy
                 d2 = dx * dx + dy * dy
                 if d2 <= kapi_kare:
                     ciftler.append((d2, i, j))
+                    iz_adaylari[i].append(j)
+                    kume_adaylari[j].append(i)
 
-        # En kısa mesafeden başlayarak açgözlü (greedy) eşleme
+        # 2. Belirsiz eşleşme tespiti:
+        # Bir iz için kapı içinde >= 2 aday küme varsa veya bir kümeye >= 2 iz adaysa
+        belirsiz_izler: set[int] = set()
+        for i, k_list in iz_adaylari.items():
+            if len(k_list) >= 2:
+                belirsiz_izler.add(i)
+
+        for j, i_list in kume_adaylari.items():
+            if len(i_list) >= 2:
+                for i_idx in i_list:
+                    belirsiz_izler.add(i_idx)
+
+        # 3. En kısa mesafeden başlayarak açgözlü (greedy) eşleme
         ciftler.sort(key=lambda item: item[0])
 
         eslesen_izler: set[int] = set()
@@ -353,28 +486,49 @@ class IzTakipci:
             cy = float(merkezler_odom[j][1])
             cr = float(yaricaplar[j]) if j < len(yaricaplar) else iz.r
 
-            dt = t_val - iz.t_son
-            if dt > 1e-5:
-                v_an_x = (cx - iz.x) / dt
-                v_an_y = (cy - iz.y) / dt
-                if iz.gorulme == 1:
-                    # İlk hareket adımında doğrudan anlık hız atanır (soğuk başlangıç bias'ını önler)
-                    iz.vx = v_an_x
-                    iz.vy = v_an_y
-                else:
-                    iz.vx = self.alfa * v_an_x + (1.0 - self.alfa) * iz.vx
-                    iz.vy = self.alfa * v_an_y + (1.0 - self.alfa) * iz.vy
+            if i in belirsiz_izler:
+                # Belirsiz eşleşme: hız kestirimini sıfırla, görülmeyi sıfırla (yeniden kanıtlamalı)
+                iz.vx = 0.0
+                iz.vy = 0.0
+                iz.gorulme = 0
+                iz.ham_hizlar.clear()
+            elif hiz_guncelle_atla:
+                # Dönüş sırasında güvenilmezlik (|wz| > maks_donus_hizi):
+                # Hız güncellemesini atla (konumu güncelle, hızı koru)
+                pass
+            else:
+                dt = t_val - iz.t_son
+                if dt > 1e-5:
+                    v_an_x = (cx - iz.x) / dt
+                    v_an_y = (cy - iz.y) / dt
+                    iz.ham_hizlar.append((v_an_x, v_an_y))
+                    if len(iz.ham_hizlar) > 10:
+                        iz.ham_hizlar = iz.ham_hizlar[-10:]
+
+                    if iz.gorulme <= 1:
+                        # İlk hareket adımında doğrudan anlık hız atanır (soğuk başlangıç bias'ını önler)
+                        iz.vx = v_an_x
+                        iz.vy = v_an_y
+                    else:
+                        iz.vx = self.alfa * v_an_x + (1.0 - self.alfa) * iz.vx
+                        iz.vy = self.alfa * v_an_y + (1.0 - self.alfa) * iz.vy
 
             iz.x = cx
             iz.y = cy
             iz.r = cr
             iz.t_son = t_val
-            iz.gorulme += 1
+            if i not in belirsiz_izler:
+                iz.gorulme += 1
             iz.yas += 1
 
-        # Eşleşmeyen eski izlerin yaşını artır
+        # Eşleşmeyen eski izlerin yaşını artır (ve belirsiz olanların hızını sıfırla)
         for i, iz in enumerate(self._izler):
             if i not in eslesen_izler:
+                if i in belirsiz_izler:
+                    iz.vx = 0.0
+                    iz.vy = 0.0
+                    iz.gorulme = 0
+                    iz.ham_hizlar.clear()
                 iz.yas += 1
 
         # Eşleşmeyen yeni kümelerden yeni iz oluştur
@@ -394,6 +548,7 @@ class IzTakipci:
                     yas=1,
                     t_ilk=t_val,
                     t_son=t_val,
+                    ham_hizlar=[],
                 )
                 self._sonraki_id += 1
                 self._izler.append(yeni_iz)
@@ -498,14 +653,17 @@ def kalkan_karari(
     robot_p_odom: tuple[float, float] | Sequence[float] = (0.0, 0.0),
     robot_yaricap: float = 0.20,
     min_engel_hizi: float = 0.20,
-    min_gorulme: int = 3,
+    min_gorulme: int = 5,
+    min_iz_yasi_s: float = 0.4,
+    yon_tutarlilik: float = 0.7,
     ttc_dur: float = 1.5,
     ttc_yavas: float = 3.0,
 ) -> KalkanKarari:
     """Hareketli izleri inceleyerek kalkan kararını (dur / yavas / serbest) üretir.
 
     Kural:
-        Yalnız HAREKETLİ izler (|v_iz| >= min_engel_hizi vars. 0.20 m/s, gorulme >= 3) dikkate alınır.
+        Yalnız HAREKETLİ izler (|v_iz| >= min_engel_hizi vars. 0.20 m/s, gorulme >= min_gorulme vars. 5,
+        iz_yasi_s >= min_iz_yasi_s vars. 0.4 s ve yon_tutarliligi >= yon_tutarlilik vars. 0.7) dikkate alınır.
         Durağan nesneler (kavrama hedefi, mobilya) ASLA tetiklemez.
         TTC < ttc_dur (vars. 1.5 s) -> 'dur', olcek = 0.0
         TTC < ttc_yavas (vars. 3.0 s) -> 'yavas', olcek doğrusal (ttc_dur'da 0.0, ttc_yavas'ta 1.0)
@@ -529,8 +687,22 @@ def kalkan_karari(
 
     for iz in izler:
         v_iz = math.hypot(iz.vx, iz.vy)
-        # Yalnızca hareketli ve yeterince görülmüş izler
-        if v_iz < float(min_engel_hizi) or iz.gorulme < int(min_gorulme):
+        # 1. Hız eşiği kontrolü
+        if v_iz < float(min_engel_hizi):
+            continue
+
+        # 2. Asgari görülme sayısı kontrolü
+        if int(iz.gorulme) < int(min_gorulme):
+            continue
+
+        # 3. Asgari iz yaşı kontrolü (saniye)
+        yas_s = getattr(iz, 'iz_yasi_s', iz.t_son - iz.t_ilk)
+        if yas_s < float(min_iz_yasi_s):
+            continue
+
+        # 4. Hız yön tutarlılığı kontrolü
+        ham_hizlar = getattr(iz, 'ham_hizlar', [])
+        if yon_tutarliligi(ham_hizlar, son_n=5) < float(yon_tutarlilik):
             continue
 
         p_rel = (iz.x - rx, iz.y - ry)
@@ -647,10 +819,13 @@ class HareketliKalkan(Node):
         eslesme_kapi = float(p('eslesme_kapi', 0.35).value)
         hiz_alfa = float(p('hiz_alfa', 0.4).value)
         iz_silme_suresi = float(p('iz_silme_suresi', 0.5).value)
+        self.maks_donus_hizi = float(p('maks_donus_hizi', 0.8).value)
 
         self.robot_yaricap = float(p('robot_yaricap', 0.20).value)
         self.min_engel_hizi = float(p('min_engel_hizi', 0.20).value)
-        self.min_gorulme = int(p('min_gorulme', 3).value)
+        self.min_gorulme = int(p('min_gorulme', 5).value)
+        self.min_iz_yasi_s = float(p('min_iz_yasi_s', 0.4).value)
+        self.yon_tutarlilik = float(p('yon_tutarlilik', 0.7).value)
         self.ttc_dur = float(p('ttc_dur', 1.5).value)
         self.ttc_yavas = float(p('ttc_yavas', 3.0).value)
         self.tarama_zaman_asimi = float(p('tarama_zaman_asimi', 0.5).value)
@@ -660,11 +835,14 @@ class HareketliKalkan(Node):
             kapi=eslesme_kapi,
             alfa=hiz_alfa,
             silme_suresi=iz_silme_suresi,
+            maks_donus_hizi=self.maks_donus_hizi,
         )
 
         # Durum Değişkenleri
         self._robot_pose_odom: tuple[float, float, float] | None = None
         self._robot_v_odom: tuple[float, float] = (0.0, 0.0)
+        self._robot_wz: float = 0.0
+        self._odom_gecmisi: list[tuple[float, float, float, float]] = []
         self._son_scan_t: float | None = None
         self._son_scan_duvar_t: float | None = None
         self._son_karar: str = 'serbest'
@@ -711,9 +889,14 @@ class HareketliKalkan(Node):
         return self.get_clock().now().nanoseconds * 1e-9
 
     def _odom_cb(self, msg: Odometry) -> None:
+        t_msg = float(msg.header.stamp.sec) + float(msg.header.stamp.nanosec) * 1e-9
+        now_s = self._simdi_s()
+        t_odom = t_msg if t_msg > 0.0 else now_s
+
         pos = msg.pose.pose.position
         yaw = yaw_q(msg.pose.pose.orientation)
         self._robot_pose_odom = (float(pos.x), float(pos.y), float(yaw))
+        self._robot_wz = float(msg.twist.twist.angular.z)
 
         # Gövde hızını odom çerçevesine çevir
         vx_r = float(msg.twist.twist.linear.x)
@@ -724,6 +907,11 @@ class HareketliKalkan(Node):
         vy_odom = vx_r * s + vy_r * c
         self._robot_v_odom = (vx_odom, vy_odom)
 
+        # Odom geçmişi tamponunu güncelle (son 1 saniye)
+        self._odom_gecmisi.append((t_odom, float(pos.x), float(pos.y), float(yaw)))
+        esik_t = t_odom - 1.0
+        self._odom_gecmisi = [kayit for kayit in self._odom_gecmisi if kayit[0] >= esik_t]
+
     def _scan_cb(self, msg: LaserScan) -> None:
         t_msg = float(msg.header.stamp.sec) + float(msg.header.stamp.nanosec) * 1e-9
         now_s = self._simdi_s()
@@ -732,7 +920,10 @@ class HareketliKalkan(Node):
         self._son_scan_t = t_scan
         self._son_scan_duvar_t = now_s
 
-        if self._robot_pose_odom is None:
+        # Taramanın header.stamp anındaki robot pozunu odom geçmişinden doğrusal aradeğerle bul
+        robot_pose = poz_aradeger(self._odom_gecmisi, t_scan)
+        if robot_pose is None:
+            # Tampon aralığı dışındaysa veya 0.2 s'den uzaksa taramayı izleyiciye verme
             return
 
         pts = tarama_noktalari(
@@ -758,16 +949,23 @@ class HareketliKalkan(Node):
             merkezler_base = [merkezler_base[i] for i in secili]
             yaricaplar = [yaricaplar[i] for i in secili]
 
-        merkezler_odom = kume_merkezleri_odoma(merkezler_base, self._robot_pose_odom)
-        self.takipci.guncelle(merkezler_odom, yaricaplar, t_scan)
+        merkezler_odom = kume_merkezleri_odoma(merkezler_base, robot_pose)
+        self.takipci.guncelle(
+            merkezler_odom,
+            yaricaplar,
+            t_scan,
+            robot_wz=self._robot_wz,
+        )
 
         karar_sonuc = kalkan_karari(
             izler=self.takipci.izler(),
             robot_v_odom=self._robot_v_odom,
-            robot_p_odom=self._robot_pose_odom[:2],
+            robot_p_odom=robot_pose[:2],
             robot_yaricap=self.robot_yaricap,
             min_engel_hizi=self.min_engel_hizi,
             min_gorulme=self.min_gorulme,
+            min_iz_yasi_s=self.min_iz_yasi_s,
+            yon_tutarlilik=self.yon_tutarlilik,
             ttc_dur=self.ttc_dur,
             ttc_yavas=self.ttc_yavas,
         )

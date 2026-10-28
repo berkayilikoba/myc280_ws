@@ -27,7 +27,9 @@ from limo_autonomy.hareketli_kalkan import (
     komutu_olcekle,
     kume_merkezleri_odoma,
     kumele,
+    poz_aradeger,
     tarama_noktalari,
+    yon_tutarliligi,
 )
 
 
@@ -397,7 +399,8 @@ def test_kalkan_karari_coklu_iz_en_kritik_secimi() -> None:
     # 2. Uzakta hareketli: TTC büyük (~10 s)
     iz_uzak = Iz(id=2, x=8.0, y=0.0, r=0.2, vx=-0.5, vy=0.0, gorulme=5, yas=5)
     # 3. Yaklaşan tehdit: (1.5, 0.0)'da, hızı -0.8 m/s, TTC ~ 1.375 s (< 1.5 s ttc_dur)
-    iz_tehdit = Iz(id=3, x=1.5, y=0.0, r=0.2, vx=-0.8, vy=0.0, gorulme=4, yas=4)
+    # min_gorulme varsayılanı 3->5 yapıldığı ve min_iz_yasi_s=0.4 s eklendiği için gorulme=5, yas=5, t_ilk=0.0, t_son=0.5
+    iz_tehdit = Iz(id=3, x=1.5, y=0.0, r=0.2, vx=-0.8, vy=0.0, gorulme=5, yas=5, t_ilk=0.0, t_son=0.5)
 
     karar, olcek, gerekce = kalkan_karari(
         izler=[iz_statik, iz_uzak, iz_tehdit],
@@ -410,3 +413,191 @@ def test_kalkan_karari_coklu_iz_en_kritik_secimi() -> None:
     assert karar == 'dur'
     assert olcek == 0.0
     assert 'DUR' in gerekce
+
+
+def test_donus_gecikmeli_tarama_aradeger_hiz_kucuk() -> None:
+    """Robot yerinde 1 rad/s dönerken, tarama 80 ms gecikmeli ve DOĞRU aradeğerli pozla
+    verilince durağan noktaların hızının < 0.1 m/s kalması."""
+    takipci = IzTakipci(kapi=0.35, alfa=0.4, silme_suresi=0.5, maks_donus_hizi=1.5)
+
+    wz = 1.0  # rad/s yerinde dönüş
+    # Odom geçmişi (50 Hz, dt = 0.02 s)
+    gecmis: list[tuple[float, float, float, float]] = []
+    for k in range(100):
+        t_o = k * 0.02
+        yaw_o = wz * t_o
+        gecmis.append((t_o, 0.0, 0.0, yaw_o))
+
+    # Odom'da (2.0, 1.0) konumunda durağan bir nesne
+    nesne_odom_gercek = (2.0, 1.0)
+
+    # Taramalar 10 Hz (her 100 ms) geliyor ancak t_scan damgası var (80 ms gecikmeyle)
+    for step in range(10):
+        t_scan = 0.20 + step * 0.10  # 0.20 s ile 1.10 s arasında
+        pose_aradeger = poz_aradeger(gecmis, t_scan)
+        assert pose_aradeger is not None
+
+        # Gerçekte t_scan anındaki robot açısına göre sensörün gördüğü bağıl nokta
+        yaw_true = wz * t_scan
+        c = math.cos(yaw_true)
+        s = math.sin(yaw_true)
+        dx = nesne_odom_gercek[0]
+        dy = nesne_odom_gercek[1]
+        x_base = c * dx + s * dy
+        y_base = -s * dx + c * dy
+
+        # Aradeğerli pozla odom'a çevir
+        merkezler_odom = kume_merkezleri_odoma([(x_base, y_base)], pose_aradeger)
+        # robot_wz=0 verilse bile (yani hız güncellemesi açık tutulsa bile) aradeğerin doğruluğu
+        # sayesinde durağan noktanın hızı < 0.1 m/s kalmalıdır
+        takipci.guncelle(merkezler_odom, [0.15], t_scan, robot_wz=0.0)
+
+    izler = takipci.izler()
+    assert len(izler) == 1
+    hiz_kestirimi = izler[0].hiz
+    assert hiz_kestirimi < 0.10, (
+        f"Durağan noktanın kestirilen hızı {hiz_kestirimi:.4f} m/s >= 0.10 m/s!"
+    )
+
+
+def test_yakin_duragan_kumeler_gurultulu_serbest_karari() -> None:
+    """0.4 m arayla iki durağan küme, gürültülü ölçümle 30 adımda 'serbest' kararı."""
+    takipci = IzTakipci(kapi=0.35, alfa=0.4, silme_suresi=0.5)
+
+    # 0.4 m arayla iki masa ayağı / durağan nesne (1.5, 0.0) ve (1.5, 0.40)
+    kume1_true = (1.50, 0.00)
+    kume2_true = (1.50, 0.40)
+    rng = np.random.RandomState(42)
+
+    for k in range(30):
+        t = k * 0.10
+        # ±0.02 m gürültü
+        g1 = rng.uniform(-0.02, 0.02, size=2)
+        g2 = rng.uniform(-0.02, 0.02, size=2)
+        c1 = (kume1_true[0] + float(g1[0]), kume1_true[1] + float(g1[1]))
+        c2 = (kume2_true[0] + float(g2[0]), kume2_true[1] + float(g2[1]))
+
+        takipci.guncelle([c1, c2], [0.10, 0.10], t, robot_wz=0.0)
+
+        karar = kalkan_karari(
+            izler=takipci.izler(),
+            robot_v_odom=(0.0, 0.0),
+            robot_p_odom=(0.0, 0.0),
+            min_engel_hizi=0.20,
+            min_gorulme=5,
+            min_iz_yasi_s=0.4,
+            yon_tutarlilik=0.7,
+            ttc_dur=1.5,
+            ttc_yavas=3.0,
+        )
+
+        assert karar.karar == 'serbest', (
+            f"Adım {k} (t={t:.1f}s)'de durağan kümeler için karar 'serbest' olmalı, "
+            f"alınan: {karar.karar} ({karar.gerekce})"
+        )
+
+
+def test_karsidan_gelen_insan_1s_icinde_dur_tetikler() -> None:
+    """Karşıdan 0.6 m/s gelen insan hâlâ <= 1.0 s içinde 'dur' tetikler (gerçek tehditi kaçırma)."""
+    takipci = IzTakipci(kapi=0.35, alfa=0.4, silme_suresi=0.5)
+
+    # Robot (0, 0)'da, insan 1.4 m öteden robota doğru 0.6 m/s ile yaklaşıyor
+    dur_tetiklendi = False
+    tetiklenme_t: float | None = None
+
+    for k in range(11):  # 0.0 - 1.0 saniye arası (10 Hz, 11 adım)
+        t = k * 0.10
+        x_insan = 1.40 - 0.60 * t
+        merkezler = [(x_insan, 0.0)]
+        takipci.guncelle(merkezler, [0.20], t, robot_wz=0.0)
+
+        karar = kalkan_karari(
+            izler=takipci.izler(),
+            robot_v_odom=(0.0, 0.0),
+            robot_p_odom=(0.0, 0.0),
+            robot_yaricap=0.20,
+            min_engel_hizi=0.20,
+            min_gorulme=5,
+            min_iz_yasi_s=0.4,
+            yon_tutarlilik=0.7,
+            ttc_dur=1.5,
+            ttc_yavas=3.0,
+        )
+
+        if karar.karar == 'dur':
+            dur_tetiklendi = True
+            tetiklenme_t = t
+            break
+
+    assert dur_tetiklendi is True, "Karşıdan gelen 0.6 m/s insan 1.0 s içinde DUR tetiklemeli!"
+    assert tetiklenme_t is not None and tetiklenme_t <= 1.0, (
+        f"DUR tetiklenme zamanı {tetiklenme_t}s > 1.0s!"
+    )
+
+
+def test_poz_aradeger_yaw_wrap() -> None:
+    """poz_aradeger fonksiyonunda yaw wrap (179° -> -179°) aradeğer testi."""
+    yaw_179 = math.radians(179.0)
+    yaw_eksi_179 = math.radians(-179.0)
+
+    # t = 0.0'da (1.0, 2.0, 179°), t = 1.0'da (3.0, 4.0, -179°)
+    # En kısa açısal fark: 179° -> 180° / -180° -> -179° = +2° (+0.0349 rad)
+    gecmis = [
+        (0.0, 1.0, 2.0, yaw_179),
+        (1.0, 3.0, 4.0, yaw_eksi_179),
+    ]
+
+    # 1. Tam ortada t = 0.5: x=2.0, y=3.0, yaw = 180° veya -180° (pi veya -pi)
+    poz_orta = poz_aradeger(gecmis, 0.5, maks_dt=1.0)
+    assert poz_orta is not None
+    assert abs(poz_orta[0] - 2.0) < 1e-4
+    assert abs(poz_orta[1] - 3.0) < 1e-4
+    assert abs(abs(poz_orta[2]) - math.pi) < 1e-4
+
+    # 2. Çeyrek noktada t = 0.25: yaw = 179.5°
+    poz_25 = poz_aradeger(gecmis, 0.25, maks_dt=1.0)
+    assert poz_25 is not None
+    assert abs(poz_25[2] - math.radians(179.5)) < 1e-4
+
+    # 3. Üç çeyrekte t = 0.75: yaw = -179.5°
+    poz_75 = poz_aradeger(gecmis, 0.75, maks_dt=1.0)
+    assert poz_75 is not None
+    assert abs(poz_75[2] - math.radians(-179.5)) < 1e-4
+
+    # 4. Ters yön: -179° -> 179° (-2° dönüş)
+    gecmis_ters = [
+        (0.0, 0.0, 0.0, yaw_eksi_179),
+        (1.0, 0.0, 0.0, yaw_179),
+    ]
+    poz_ters_orta = poz_aradeger(gecmis_ters, 0.5, maks_dt=1.0)
+    assert poz_ters_orta is not None
+    assert abs(abs(poz_ters_orta[2]) - math.pi) < 1e-4
+
+    # 5. maks_dt (0.2 s) sınır kontrolleri
+    # 0.1 s dışarıda -> en yakın ucu kullanır
+    poz_yakin_son = poz_aradeger(gecmis, 1.10, maks_dt=0.2)
+    assert poz_yakin_son is not None
+    assert abs(poz_yakin_son[0] - 3.0) < 1e-4
+
+    poz_yakin_ilk = poz_aradeger(gecmis, -0.10, maks_dt=0.2)
+    assert poz_yakin_ilk is not None
+    assert abs(poz_yakin_ilk[0] - 1.0) < 1e-4
+
+    # 0.25 s dışarıda (> maks_dt 0.2s) -> None döner
+    assert poz_aradeger(gecmis, 1.25, maks_dt=0.2) is None
+    assert poz_aradeger(gecmis, -0.25, maks_dt=0.2) is None
+    assert poz_aradeger([], 0.5) is None
+
+
+def test_yon_tutarliligi() -> None:
+    """Hız yön tutarlılığı fonksiyonunun doğrulanması."""
+    # Aynı yönde 5 ölçüm -> tutarlılık 1.0
+    hizlar_duz = [(0.5, 0.0)] * 5
+    assert abs(yon_tutarliligi(hizlar_duz) - 1.0) < 1e-4
+
+    # Zıt yönde gidip gelen ölçümler -> tutarlılık ~0
+    hizlar_titrek = [(0.5, 0.0), (-0.5, 0.0), (0.5, 0.0), (-0.5, 0.0)]
+    assert yon_tutarliligi(hizlar_titrek) < 0.1
+
+    # Boş ölçüm -> 0.0
+    assert yon_tutarliligi([]) == 0.0

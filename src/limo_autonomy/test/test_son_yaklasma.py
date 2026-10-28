@@ -429,7 +429,7 @@ def test_olcum_kesilmesi_0_2m_tamam_0_4m_hata():
 
     rho=0.40 m'de (> olcumsuz_mesafe 0.25 m) kesilirse 'HATA:zaman_asimi'.
     """
-    ayar = SonYaklasmaAyar(olcum_zaman_asimi=1.0, olcumsuz_mesafe=0.25)
+    ayar = SonYaklasmaAyar(olcum_zaman_asimi=1.0, olcumsuz_mesafe=0.25, kayip_tolerans_mesafe=0.25)
 
     # 1. rho=0.20 m'de kesilme: olcumsuz_mesafe (0.25 m) altında kaldığı için odomla TAMAM
     durum_20cm, gercek_20cm, _, _ = kapali_cevrim_simule(

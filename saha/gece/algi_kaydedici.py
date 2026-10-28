@@ -157,6 +157,7 @@ class AlgiKaydediciDugumu(Node):
         # 1. base_footprint çerçevesine dönüştür
         hata_cm = None
         p_bf = None
+        gercek_bf = None
         try:
             t_bf = self.tf_buffer.lookup_transform(
                 'base_footprint',
@@ -177,6 +178,7 @@ class AlgiKaydediciDugumu(Node):
             x_bf_gercek, y_bf_gercek = robot_cercevesine_donustur(
                 rx, ry, ryaw, self.nesne_gercek[0], self.nesne_gercek[1]
             )
+            gercek_bf = [float(x_bf_gercek), float(y_bf_gercek)]
             hata_m = math.hypot(p_bf[0] - x_bf_gercek, p_bf[1] - y_bf_gercek)
             hata_cm = float(hata_m * 100.0)
         else:
@@ -201,6 +203,7 @@ class AlgiKaydediciDugumu(Node):
             'bf_nokta': list(p_bf) if p_bf else None,
             'son_yaklasma': self.son_yaklasma_aktif,
             'hata_cm': hata_cm,
+            'gercek_bf': gercek_bf,
         }
 
         self.tum_olcumler.append(kayit)
@@ -234,6 +237,7 @@ class AlgiKaydediciDugumu(Node):
             'tum_olcum_sayisi': len(self.tum_olcumler),
             'tum_ortalama_hata_cm': tum_ort,
             'tum_hatalar_cm': self.tum_hatalar_cm,
+            'olcumler': self.tum_olcumler,
             'durum_kayitlari': self.durum_kayitlari,
         }
 
