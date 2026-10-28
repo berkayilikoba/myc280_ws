@@ -44,6 +44,19 @@ def generate_launch_description():
     nav_to_pose_bt = LaunchConfiguration('nav_to_pose_bt')
     is_slam = PythonExpression(["'", localization, "' == 'slam'"])
     is_amcl = PythonExpression(["'", localization, "' == 'amcl'"])
+    # localization:=yok -> haritaya göre düzeltme YOK: map->odom sabit (birim), harita yalnız costmap için.
+    # Nav2 tamamen /odom'a güvenir (görsel odometri tek başına kalırsa en kötü durum; odom_profil ile birlikte).
+    is_yok = PythonExpression(["'", localization, "' == 'yok'"])
+    lokalizasyonsuz = [
+        Node(condition=IfCondition(is_yok), package='tf2_ros', executable='static_transform_publisher',
+             name='map_odom_sabit', arguments=['--frame-id', 'map', '--child-frame-id', 'odom'],
+             parameters=[{'use_sim_time': True}]),
+        Node(condition=IfCondition(is_yok), package='nav2_map_server', executable='map_server', name='map_server',
+             output='screen', parameters=[{'use_sim_time': True, 'yaml_filename': map_yaml}]),
+        Node(condition=IfCondition(is_yok), package='nav2_lifecycle_manager', executable='lifecycle_manager',
+             name='lifecycle_manager_harita', output='screen',
+             parameters=[{'use_sim_time': True, 'autostart': True, 'node_names': ['map_server']}]),
+    ]
     slam_params = os.path.join(bringup_dir, 'param', 'slam_toolbox_limo.yaml')
 
     nav2_rviz_config = os.path.join(
@@ -67,6 +80,7 @@ def generate_launch_description():
                     'headless': headless,
                     'use_rviz': use_rviz,
                     'rviz_config_file': nav2_rviz_config,
+                    'world': LaunchConfiguration('world'),
                 }.items()
             )
         ]
@@ -116,7 +130,7 @@ def generate_launch_description():
                 'map': map_yaml,
             }.items())])
 
-    return LaunchDescription([
+    return LaunchDescription(lokalizasyonsuz + [
         DeclareLaunchArgument(
             'use_arm', default_value='true',
             description='Robot kolu (MyCobot 280) entegreli modeli kullan (varsayılan: true)'),
@@ -133,9 +147,12 @@ def generate_launch_description():
             description='RViz2 başlat (varsayılan: true)'),
         DeclareLaunchArgument(
             'localization', default_value='slam',
-            choices=['slam', 'amcl'],
+            choices=['slam', 'amcl', 'yok'],
             description='slam: slam_toolbox canlı harita. amcl: map argümanındaki bilinen '
                         'harita + AMCL (ölçüm koşuları için; bkz. scripts/world_to_map.py).'),
+        DeclareLaunchArgument(
+            'world', default_value=os.path.join(get_package_share_directory('limo_car'), 'worlds', 'empty_world.model'),
+            description='Gazebo dünyası (kollu diff). Gerçek oda: limo_car/worlds/lab_oda_3b.world (3B, dokulu; docs/oda_3b.md) ya da lab_oda.world (2B kutular), ikisi de map:=maps/lab_oda.yaml'),
         DeclareLaunchArgument(
             'map', default_value=os.path.join(bringup_dir, 'maps', 'sim_world.yaml'),
             description='localization:=amcl iken yüklenecek harita'),

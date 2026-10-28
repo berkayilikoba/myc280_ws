@@ -130,10 +130,11 @@ def zincir(tfs, *cerceveler):
     return yol[son]
 
 
-def kamera_dis(tfs, kalib_yolu):
+def kamera_dis(tfs, kalib_yolu, dosya_oncelikli=False):
     """base_link -> camera_link: kayıttaki /tf_static'te varsa o (nav_baslat.sh, o günkü kameranın kalibrasyonu),
-    yoksa kalibrasyon dosyası (09.10 Dabai kayıtlarında bu halka yoktu)."""
-    if ('base_link', 'camera_link') in tfs:
+    yoksa kalibrasyon dosyası (09.10 Dabai kayıtlarında bu halka yoktu). dosya_oncelikli: kayıttan sonra düzeltilmiş
+    kalibrasyonu uygulamak için (27.10: D435 y 0 -> 0.0175)."""
+    if ('base_link', 'camera_link') in tfs and not dosya_oncelikli:
         return tfs[('base_link', 'camera_link')].copy()
     kal = yaml.safe_load(open(kalib_yolu))['base_link_to_camera_link']
     return T(rpy2R(*kal['rotation_rpy_rad']), kal['translation_m'])
@@ -160,23 +161,53 @@ def goruntu(m):
     raise ValueError(f'desteklenmeyen kodlama {m.encoding}')
 
 
-def derinlik_hizala(dmm, Kd, Kc, T_c_d, boyut, zmin=0.2, zmax=8.0, doldur=True):
-    """Derinlik (mm, derinlik optik) -> renk optik çerçevesine izdüşüm, metre, z-tamponu (en yakın kazanır)."""
+def derinlik_hizala(dmm, Kd, Kc, T_c_d, boyut, zmin=0.2, zmax=8.0, doldur=True, kapla=True):
+    """Derinlik (mm, derinlik optik) -> renk optik çerçevesine izdüşüm, metre, z-tamponu (en yakın kazanır).
+    kapla (27.10, varsayılan): RealSense SDK align gibi her derinlik pikselinin köşeleri (u±0.5, v±0.5) izdüşürülür ve
+    renk görüntüsünde kapladığı dikdörtgenin tamamı z-testiyle yazılır. Eskisi (kapla=False) pikseli tek noktaya
+    yazıyordu: D435'te derinlik FOV'u geniş olduğundan renk ızgarasında delik kalıyor, ön plan nesnelerinin deliklerine
+    arka planın derinliği sızıyordu (nesne kenarında yanlış 3B nokta). Dabai donanım hizasında (aynı K, T=I) fark yok."""
     H, W = dmm.shape
     v, u = np.nonzero((dmm > zmin * 1000) & (dmm < zmax * 1000))
     z = dmm[v, u].astype(np.float64) / 1000.0
-    P = np.stack([(u - Kd[0, 2]) * z / Kd[0, 0], (v - Kd[1, 2]) * z / Kd[1, 1], z, np.ones_like(z)])
-    Q = T_c_d @ P
-    on = Q[2] > 1e-3
-    Q = Q[:, on]
-    uc = np.round(Kc[0, 0] * Q[0] / Q[2] + Kc[0, 2]).astype(int)
-    vc = np.round(Kc[1, 1] * Q[1] / Q[2] + Kc[1, 2]).astype(int)
     Hc, Wc = boyut
-    ic = (uc >= 0) & (uc < Wc) & (vc >= 0) & (vc < Hc)
-    uc, vc, zc = uc[ic], vc[ic], Q[2, ic]
-    sira = np.argsort(-zc)                      # uzaktan yakına yaz: son yazılan (en yakın) kalır
+
+    def izd(du, dv):
+        P = np.stack([(u + du - Kd[0, 2]) * z / Kd[0, 0], (v + dv - Kd[1, 2]) * z / Kd[1, 1], z, np.ones_like(z)])
+        Q = T_c_d @ P
+        Q[2] = np.maximum(Q[2], 1e-3)
+        return Kc[0, 0] * Q[0] / Q[2] + Kc[0, 2], Kc[1, 1] * Q[1] / Q[2] + Kc[1, 2], Q[2]
     out = np.zeros((Hc, Wc), np.float32)
-    out[vc[sira], uc[sira]] = zc[sira]
+    if not kapla:
+        x, y, zc = izd(0, 0)
+        uc, vc = np.round(x).astype(int), np.round(y).astype(int)
+        ic = (uc >= 0) & (uc < Wc) & (vc >= 0) & (vc < Hc) & (zc > 1e-3)
+        uc, vc, zc = uc[ic], vc[ic], zc[ic]
+        sira = np.argsort(-zc)                      # uzaktan yakına yaz: son yazılan (en yakın) kalır
+        out[vc[sira], uc[sira]] = zc[sira]
+    else:
+        x0, y0, zc = izd(-0.5, -0.5)
+        x1, y1, _ = izd(0.5, 0.5)
+        u0, v0 = np.ceil(np.minimum(x0, x1) - 0.5).astype(int), np.ceil(np.minimum(y0, y1) - 0.5).astype(int)
+        u1, v1 = np.floor(np.maximum(x0, x1) - 0.5).astype(int), np.floor(np.maximum(y0, y1) - 0.5).astype(int)
+        u1, v1 = np.maximum(u1, u0), np.maximum(v1, v0)          # en az bir piksel
+        ok = (u1 >= 0) & (u0 < Wc) & (v1 >= 0) & (v0 < Hc) & (u1 - u0 < 6) & (v1 - v0 < 6)
+        u0, u1, v0, v1, zc = u0[ok], u1[ok], v0[ok], v1[ok], zc[ok]
+        sira = np.argsort(-zc)
+        u0, u1, v0, v1, zc = u0[sira], u1[sira], v0[sira], v1[sira], zc[sira]
+        zbuf = np.full((Hc, Wc), np.inf, np.float32)
+        for dy in range(int((v1 - v0).max(initial=0)) + 1):
+            for dx in range(int((u1 - u0).max(initial=0)) + 1):
+                k = (u0 + dx <= u1) & (v0 + dy <= v1)
+                uu, vv, zz = u0[k] + dx, v0[k] + dy, zc[k]
+                ic = (uu >= 0) & (uu < Wc) & (vv >= 0) & (vv < Hc)
+                uu, vv, zz = uu[ic], vv[ic], zz[ic]
+                # aynı hücreye birden çok yazım: uzaktan yakına sıralı -> numpy atamada son (en yakın) kalır; önceki
+                # ofset turlarında yazılmış daha yakın değeri korumak için z-testi
+                yaz = zz < zbuf[vv, uu]
+                zbuf[vv[yaz], uu[yaz]] = zz[yaz]
+        out = np.where(np.isfinite(zbuf), zbuf, 0).astype(np.float32)
+        doldur = False                              # kaplama deliği zaten bırakmıyor
     if doldur:
         # Seyrek izdüşüm delikleri: derinlik görüş alanı renkten genişse (D435: 87° vs 69°, ikisi de 640 px) derinlik
         # pikselleri renk ızgarasına seyrek düşer (14.10: geçerli oran %40). 3x3'te >=4 geçerli komşusu olan boş piksele
@@ -231,7 +262,8 @@ def main():
     ap.add_argument('kamera_bag')
     ap.add_argument('sensor_bag')
     ap.add_argument('cikti')
-    ap.add_argument('--kalib', default=os.path.join(BURADA, '..', 'config', 'kamera_kalibrasyon.yaml'))
+    ap.add_argument('--kalib', help='kalibrasyon dosyası; verilirse kayıttaki tf_static base_link->camera_link yerine '
+                    'bu kullanılır (varsayılan: tf_static, yoksa config/kamera_kalibrasyon.yaml)')
     ap.add_argument('--her', type=int, default=1, help='her N. renk karesi')
     ap.add_argument('--esik_ms', type=float, default=30.0, help='renk-derinlik eşleme eşiği')
     ap.add_argument('--bosluk_s', type=float, default=0.25, help='odom boşluğu bundan uzunsa kareyi atla')
@@ -247,14 +279,19 @@ def main():
                     help='yüzey normali-görüş ışını açısı bundan büyük pikselleri at (derece, 0=kapalı; ör. 70)')
     ap.add_argument('--max_w', type=float, default=0.0,
                     help='gövde açısal hızı bundan büyükse (rad/s) kareyi atla (bulanıklık/eşleme hatası; 0=kapalı)')
+    ap.add_argument('--olcek', type=float, default=1.0,
+                    help='renk (ve hizalı derinlik) çıktısını bu oranla küçült (ör. 0.5: 1280x720 -> 640x360). LSeg girdiyi '
+                         'zaten uzun kenar 520 px\'e indiriyor (vlmap_builder_cam base_size); disk 4 kat azalır')
     a = ap.parse_args()
 
+    dosya_oncelikli = a.kalib is not None
+    a.kalib = a.kalib or os.path.join(BURADA, '..', 'config', 'kamera_kalibrasyon.yaml')
     kal = yaml.safe_load(open(a.kalib))['base_link_to_camera_link']
     O, tfs, ci = sensor_oku(a.sensor_bag)
     if a.poz_dosyasi:   # lidar ile düzeltilmiş poz (lidar_poz.py): dünya = harita çerçevesi
         O = np.loadtxt(a.poz_dosyasi, delimiter=',', comments='#')[:, :4]
         O[:, 3] = np.unwrap(O[:, 3])
-    T_b_cl = kamera_dis(tfs, a.kalib)
+    T_b_cl = kamera_dis(tfs, a.kalib, dosya_oncelikli)
     T_b_cl[2, 3] += a.taban_z           # base_link -> base_footprint: dünya z = 0 zemin (poses.txt z = 0)
     T_cl_co = zincir(tfs, 'camera_link', 'camera_depth_frame', 'camera_color_frame', 'camera_color_optical_frame')
     T_cl_do = zincir(tfs, 'camera_link', 'camera_depth_frame', 'camera_depth_optical_frame')
@@ -262,6 +299,11 @@ def main():
     Kc, Dc = np.array(ci['color'].k).reshape(3, 3), np.array(ci['color'].d)
     Kd = np.array(ci['depth'].k).reshape(3, 3)
     Hc, Wc = ci['color'].height, ci['color'].width
+    Ko = Kc.copy()                                      # çıktı K (ölçekli)
+    if a.olcek != 1.0:
+        Hc, Wc = int(round(Hc * a.olcek)), int(round(Wc * a.olcek))
+        Ko[:2, :2] *= a.olcek
+        Ko[:2, 2] = (Kc[:2, 2] + 0.5) * a.olcek - 0.5
 
     # derinlik karelerini damgalarıyla belleğe al (~0.5 MB/kare); renk akışı sırayla işlenir
     derin, d_cerceve = [], None
@@ -303,12 +345,14 @@ def main():
         Tw_co = Tw_bc @ T_b_co
         T_c_d = np.linalg.inv(Tw_co) @ Tw_bd @ T_b_do        # derinlik optik (td) -> renk optik (tc)
         rgb = cv2.undistort(goruntu(m), Kc, Dc)               # ROS rational_polynomial sırası = OpenCV
+        if a.olcek != 1.0:
+            rgb = cv2.resize(rgb, (Wc, Hc), interpolation=cv2.INTER_AREA)
         dmm = derin[j][1]
         if a.kenar > 0:
             dmm = kenar_suz(dmm, a.kenar)
         if a.egim_max > 0:
             dmm = egim_suz(dmm, Kd, a.egim_max)
-        dep = derinlik_hizala(dmm, Kd, Kc, T_c_d, (Hc, Wc), zmax=a.zmax, doldur=not a.doldurma)
+        dep = derinlik_hizala(dmm, Kd, Ko, T_c_d, (Hc, Wc), zmax=a.zmax, doldur=not a.doldurma)
         cv2.imwrite(os.path.join(a.cikti, 'rgb', f'{n:06d}.png'), rgb)
         np.save(os.path.join(a.cikti, 'depth', f'{n:06d}.npy'), dep)
         for f, M in ((f_poz, Tw_bc), (f_kam, Tw_co)):
@@ -325,7 +369,7 @@ def main():
         'camera_height': round(float(T_b_co[2, 3]), 4),             # zeminden (gövde pozu = base_footprint)
         'base2cam_rot': [round(float(v), 6) for v in R_b_co.ravel()],
         'base_forward_axis': [1, 0, 0], 'base_left_axis': [0, 1, 0], 'base_up_axis': [0, 0, 1]},
-        'cam_calib_mat': [round(float(v), 4) for v in Kc.ravel()]}
+        'cam_calib_mat': [round(float(v), 4) for v in Ko.ravel()]}
     with open(os.path.join(a.cikti, 'vlmaps_config.yaml'), 'w') as f:
         f.write('# VLMaps config/map_config/vlmaps.yaml içine (pose_info + cam_calib_mat).\n'
                 '# poses.txt = gövde (mobile_base), ROS eksenleri. Kamera gövdeye göre ayrıca '
@@ -337,7 +381,7 @@ def main():
              'dunya_cercevesi': 'odom (robot açılışındaki konum), z yukarı, z=0 zemin; poses.txt = base_footprint', 'poz_kaynagi': a.poz_dosyasi or '/odom_duz',
              'sayilar': say, 'suzgecler': {'delik_doldurma': not a.doldurma, 'egim_max_deg': a.egim_max, 'zmax_m': a.zmax, 'kenar_oran': a.kenar, 'max_w_rad_s': a.max_w, 'her': a.her}, 'kalibrasyon': kal,
              'T_base_renkoptik': [[round(float(v), 6) for v in r] for r in T_b_co],
-             'renk_K': Kc.ravel().round(4).tolist(), 'renk_bozulma_giderildi': Dc.round(5).tolist(),
+             'renk_K': Ko.ravel().round(4).tolist(), 'olcek': a.olcek, 'renk_bozulma_giderildi': Dc.round(5).tolist(),
              'derinlik_K': Kd.ravel().round(4).tolist()}
     with open(os.path.join(a.cikti, 'bilgi.yaml'), 'w') as f:
         yaml.safe_dump(bilgi, f, sort_keys=False, allow_unicode=True, default_flow_style=None)

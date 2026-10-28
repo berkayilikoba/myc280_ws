@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Duvar mesafe testi (PC, Humble): robot düz bir duvara bakarak verilen mesafelerde durur (derinlik doğruluğu / gürültü).
 
-Mesafe = duvarın base_link'e uzaklığı, lidardan (/scan_sabit, laser_duz: base_link'e göre x 0.137 m, yön düzeltilmiş),
-öndeki ±3° ışınların medyanı. Komut cmd_vel_smoothed -> collision_monitor (Nav2 açık olmalı).
+Mesafe = duvarın base_link'e uzaklığı (gövde x'i boyunca), lidardan (/scan_sabit gövde çerçevesine çevrilir, |y| < 5 cm
+noktaların x medyanı). Komut cmd_vel_smoothed -> collision_monitor (Nav2 açık olmalı).
 İsteğe bağlı başta yerinde dönüş (--don derece, + sol) ve sonda geri dönüş (başlangıç pozuna, odom ile).
 Lidar arkayı görmez: geri gidiş --geri_max (m, başlangıca göre) ile sınırlı.
 Her durakta --bekle s durur; durak zamanları --log CSV'ye (analiz: analiz/duvar_analiz.py).
@@ -22,7 +22,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 
-LIDAR_X = 0.137
+LIDAR_X, LIDAR_Y, LIDAR_YAW = 0.137, 0.015, -0.1686   # base_link -> laser_duz (ortam.sh lidar_tf_yayinla)
 
 
 def wrap(a):
@@ -44,10 +44,13 @@ class Duvar(Node):
         self.poz = (p.x, p.y, math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y ** 2 + q.z ** 2)))
 
     def scan_cb(self, m):
+        # gövde çerçevesine çevir (laser_duz gövdeye göre -9.66° dönük; 27.10'a dek açı 0 alınıyordu = 9.66° sağ)
         r = np.array(m.ranges)
-        aci = m.angle_min + np.arange(len(r)) * m.angle_increment
-        k = (np.abs(np.arctan2(np.sin(aci), np.cos(aci))) < math.radians(3)) & np.isfinite(r) & (r > 0.05)
-        self.on = (float(np.median(r[k])) + LIDAR_X, time.time()) if k.sum() >= 3 else None
+        k = np.isfinite(r) & (r > 0.05)
+        a = m.angle_min + np.nonzero(k)[0] * m.angle_increment + LIDAR_YAW
+        x, y = LIDAR_X + r[k] * np.cos(a), LIDAR_Y + r[k] * np.sin(a)
+        s = (x > 0.05) & (np.abs(y) < 0.05)
+        self.on = (float(np.median(x[s])), time.time()) if s.sum() >= 2 else None
 
     def bekle_veri(self):
         t = time.time()

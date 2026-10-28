@@ -1,0 +1,596 @@
+<?xml version="1.0" ?>
+<!--
+  Gazebo Classic SDF Dunyasi (lab_oda_3b)
+  Kaynak yapi: /home/gunes/limo_robot/limo_ws/saha/oda/cikti/kur/oda_yapi.yaml
+  Kaynak mesh dizini: /home/gunes/limo_robot/limo_ws/saha/oda/cikti/kur/tsdf
+  Not: Tavan yuksekligi (2.70 m) varsayimdir.
+-->
+<sdf version="1.6">
+  <world name="lab_oda_3b">
+    <!-- oda_dogrula.py robotu ışınlamak için /gazebo/set_entity_state kullanır -->
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so"><ros><namespace>/gazebo</namespace></ros><update_rate>1.0</update_rate></plugin>
+    <include>
+      <uri>model://sun</uri>
+    </include>
+    <scene>
+      <ambient>1 1 1 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>false</shadows>
+    </scene>
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+    <!-- Ic mekan isiklari: 4 adet nokta isik -->
+    <light type="point" name="ic_isik_0">
+      <pose>-0.2620 1.2015 2.5500 0 0 0</pose>
+      <diffuse>0.0 0.0 0.0 1</diffuse>
+      <specular>0.1 0.1 0.1 1</specular>
+      <attenuation>
+        <range>8</range>
+        <constant>0.4</constant>
+        <linear>0.08</linear>
+        <quadratic>0.01</quadratic>
+      </attenuation>
+      <cast_shadows>false</cast_shadows>
+    </light>
+    <light type="point" name="ic_isik_1">
+      <pose>1.7380 1.2015 2.5500 0 0 0</pose>
+      <diffuse>0.0 0.0 0.0 1</diffuse>
+      <specular>0.1 0.1 0.1 1</specular>
+      <attenuation>
+        <range>8</range>
+        <constant>0.4</constant>
+        <linear>0.08</linear>
+        <quadratic>0.01</quadratic>
+      </attenuation>
+      <cast_shadows>false</cast_shadows>
+    </light>
+    <light type="point" name="ic_isik_2">
+      <pose>3.7380 1.2015 2.5500 0 0 0</pose>
+      <diffuse>0.0 0.0 0.0 1</diffuse>
+      <specular>0.1 0.1 0.1 1</specular>
+      <attenuation>
+        <range>8</range>
+        <constant>0.4</constant>
+        <linear>0.08</linear>
+        <quadratic>0.01</quadratic>
+      </attenuation>
+      <cast_shadows>false</cast_shadows>
+    </light>
+    <light type="point" name="ic_isik_3">
+      <pose>5.7380 1.2015 2.5500 0 0 0</pose>
+      <diffuse>0.0 0.0 0.0 1</diffuse>
+      <specular>0.1 0.1 0.1 1</specular>
+      <attenuation>
+        <range>8</range>
+        <constant>0.4</constant>
+        <linear>0.08</linear>
+        <quadratic>0.01</quadratic>
+      </attenuation>
+      <cast_shadows>false</cast_shadows>
+    </light>
+    <!-- Zemin Modeli -->
+    <model name="zemin">
+      <static>true</static>
+      <link name="zemin_link">
+        <pose>1.7480 1.0115 -0.01 0 0 0</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>9.0200 4.6200 0.02</size>
+            </box>
+          </geometry>
+          <surface>
+            <friction>
+              <ode>
+                <mu>1.0</mu>
+                <mu2>1.0</mu2>
+              </ode>
+            </friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>9.0200 4.6200 0.02</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.4842 0.4347 0.3921 1.0</ambient>
+            <diffuse>0.4842 0.4347 0.3921 1.0</diffuse>
+          </material>
+        </visual>
+        <!-- Doku: dünya koordinatlı OBJ dörtgeni; link (merkez, z=-0.01) telafisiyle dünyada z=0.001 -->
+        <visual name="visual_doku">
+          <pose>-1.7480 -1.0115 0.0110 0 0 0</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/zemin_doku.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/zemin</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <!-- Tavan Modeli -->
+    <model name="tavan">
+      <static>true</static>
+      <link name="tavan_link">
+        <pose>1.7480 1.0115 2.7100 0 0 0</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>9.0200 4.6200 0.02</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>9.0200 4.6200 0.02</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.4235 0.3647 0.3294 1.0</ambient>
+            <diffuse>0.4235 0.3647 0.3294 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <!-- Duvarlar Modeli -->
+    <model name="duvarlar">
+      <static>true</static>
+      <link name="duvar_0">
+        <pose>1.3481 -0.6861 1.3500 0 0 0.0174</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>6.0790 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>-1.3359 0.7095 -1.3500 0 0 -0.0174</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_0.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_0</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_1">
+        <pose>1.3682 2.7204 1.3500 0 0 0.0175</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>3.8794 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>-1.4155 -2.6961 -1.3500 0 0 -0.0175</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_1.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_1</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_2">
+        <pose>4.5983 2.7001 1.3500 0 0 0.0174</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>1.5813 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>-4.6446 -2.6196 -1.3500 0 0 -0.0174</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_2.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_2</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_3">
+        <pose>-2.2654 1.1543 1.3500 0 0 -1.5533</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>2.2766 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>1.1937 2.2449 -1.3500 0 0 1.5533</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_3.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_3</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_4">
+        <pose>3.0282 1.7405 1.3500 0 0 0.0176</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.5614 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>-3.0583 -1.6870 -1.3500 0 0 -0.0176</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_4.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_4</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_5">
+        <pose>5.7889 0.8216 1.3500 0 0 1.5882</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>1.6997 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>-0.7206 5.8024 -1.3500 0 0 -1.5882</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_5.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_5</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_6">
+        <pose>5.5377 1.5648 1.3500 0 0 0.0173</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.5396 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>-5.5640 -1.4688 -1.3500 0 0 -0.0173</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_6.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_6</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_7">
+        <pose>-0.7620 1.6990 1.3500 0 0 0.0175</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.6999 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>0.7321 -1.7121 -1.3500 0 0 -0.0175</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_7.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_7</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_8">
+        <pose>5.3220 1.8820 1.3500 0 0 -1.5534</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.8224 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>1.7888 -5.3540 -1.3500 0 0 1.5534</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_8.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_8</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_9">
+        <pose>-0.6120 1.8915 1.3500 0 0 1.3567</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.5707 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>-1.7183 -0.9998 -1.3500 0 0 -1.3567</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_9.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_9</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_10">
+        <pose>-1.1405 -0.2185 1.3500 0 0 1.5883</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.7393 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>0.1985 -1.1442 -1.3500 0 0 -1.5883</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_10.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_10</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_11">
+        <pose>4.0748 -0.3984 1.3500 0 0 -1.5536</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.5003 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>-0.4686 -4.0674 -1.3500 0 0 1.5536</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_11.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_11</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="duvar_12">
+        <pose>2.8201 1.9810 1.3500 0 0 -1.5533</pose>
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.6210 0.1000 2.7000</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual_doku">
+          <pose>1.9315 -2.8542 -1.3500 0 0 1.5533</pose>
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/duvar_doku_12.obj</uri>
+            </mesh>
+          </geometry>
+          <material>
+            <script>
+              <uri>model://lab_oda_3b/materials/scripts</uri>
+              <uri>model://lab_oda_3b/materials/textures</uri>
+              <name>Oda/isiksiz/duvar_12</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <!-- Mobilya Mesh Modeli -->
+    <model name="mobilya_mesh">
+      <static>true</static>
+      <link name="mobilya_mesh_link">
+        <pose>0 0 0 0 0 0</pose>
+        <collision name="collision">
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/oda_carpisma.obj</uri>
+              <scale>1 1 1</scale>
+            </mesh>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <mesh>
+              <uri>model://lab_oda_3b/meshes/oda_mesh_kesik.obj</uri>
+              <scale>1 1 1</scale>
+            </mesh>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+    <!-- Mesh Dışı Mobilya Yedek Modeli -->
+    <model name="mobilya_kutu">
+      <static>true</static>
+      <link name="mobilya_1">
+        <pose>5.2655 2.7965 0.3500 0 0 0</pose>
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>0.7</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>0.7</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.4 0.35 0.3 1.0</ambient>
+            <diffuse>0.7 0.6 0.5 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+      <link name="mobilya_18">
+        <pose>8.0726 0.9169 0.3500 0 0 0</pose>
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>0.7</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>0.7</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.4 0.35 0.3 1.0</ambient>
+            <diffuse>0.7 0.6 0.5 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+      <link name="mobilya_32">
+        <pose>-0.1242 -0.8163 0.3500 0 0 0</pose>
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>0.7</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>0.7</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.4 0.35 0.3 1.0</ambient>
+            <diffuse>0.7 0.6 0.5 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+      <link name="mobilya_33">
+        <pose>0.0860 -1.0593 0.3500 0 0 0</pose>
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>0.7</length>
+            </cylinder>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.02</radius>
+              <length>0.7</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.4 0.35 0.3 1.0</ambient>
+            <diffuse>0.7 0.6 0.5 1.0</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

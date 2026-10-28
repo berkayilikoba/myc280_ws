@@ -39,6 +39,11 @@ def main():
     ap.add_argument('--mesafe', type=float, default=0.6, help='nesneye istenen uzaklık (m)')
     ap.add_argument('--pay', type=float, default=0.30, help='engellerden en az uzaklık (m; LIMO yarıçapı ~0.2)')
     ap.add_argument('--cikti', help='harita üstünde nesne kümeleri ve hedefler (PNG)')
+    ap.add_argument('--kavrama', action='store_true',
+                    help='hedef = kol kavrama yaklaşması (limo_autonomy.kavrama_yaklasim): kavrama öncesi poz Q (Nav2) + '
+                         'kavrama pozu P (nesne robot merkezinin d_kavrama önünde)')
+    ap.add_argument('--d_kavrama', type=float, default=0.22, help='kol_erisim.py: 0.18-0.30 m')
+    ap.add_argument('--yon', type=float, help='istenen yaklaşma yönü (derece, harita)')
     a = ap.parse_args()
     from omegaconf import OmegaConf
     from vlmaps.map.vlmap import VLMap
@@ -54,6 +59,10 @@ def main():
     gp = vm.grid_pos.astype(float)
     X, Y = pmin[0] + gp[:, 0] * cs, -(pmin[2] + gp[:, 2] * cs)        # Habitat -> ROS harita çerçevesi
     img, res, org = harita_oku(a.harita)
+    if a.kavrama:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'limo_autonomy'))
+        from limo_autonomy.kavrama_yaklasim import Ayar, Harita, yaklasim_bul
+        kh = Harita.yaml_oku(a.harita)
     serbest = (img > 250).astype(np.uint8)                              # map_server: 254 serbest, 0 dolu, 205 bilinmiyor
     uzak = cv2.distanceTransform(serbest, cv2.DIST_L2, 5) * res         # en yakın engele / bilinmeyene uzaklık (m)
     cv, cu = np.nonzero(uzak >= a.pay)
@@ -81,11 +90,26 @@ def main():
         en = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
         kx, ky = np.nonzero((lab == en) & (izg > 0))
         mx, my = (kx + ox).mean() * cs, (ky + oy).mean() * cs
+        rk = renkler[a.sorgular.index(sorgu) % len(renkler)]
+        if a.kavrama:
+            y = yaklasim_bul(kh, (mx, my), Ayar(d_kavrama=a.d_kavrama, yon=None if a.yon is None else math.radians(a.yon)),
+                             robot=(0.0, 0.0))
+            if y is None:
+                print(f'{sorgu}: merkez ({mx:+.2f}, {my:+.2f}) -> kavrama yaklaşması bulunamadı (engel / erişim)')
+                continue
+            (px, py, th), (qx, qy, _) = y.kavrama, y.oncesi
+            for x, yy in zip((kx + ox) * cs, (ky + oy) * cs):
+                cv2.circle(gor, pik(x, yy), 2, rk, -1)
+            cv2.arrowedLine(gor, pik(qx, qy), pik(px, py), rk, 2, tipLength=0.3)
+            cv2.circle(gor, pik(qx, qy), 4, rk, 1)
+            cv2.putText(gor, sorgu, pik(mx, my), cv2.FONT_HERSHEY_SIMPLEX, 0.5, rk, 2)
+            print(f'{sorgu}: merkez ({mx:+.2f}, {my:+.2f}) -> Nav2 hedefi Q x {qx:+.2f} y {qy:+.2f} yaw {math.degrees(th):+.0f}°, '
+                  f'kavrama pozu P x {px:+.2f} y {py:+.2f} (düz {a.d_kavrama + 0.0:.2f}+0.35 m), açıklık {y.aciklik:.2f} m')
+            continue
         d = np.hypot(cx - mx, cy - my)
         j = int(np.argmin(np.abs(d - a.mesafe)))
         hx, hy = cx[j], cy[j]
         yaw = math.atan2(my - hy, mx - hx)
-        rk = renkler[a.sorgular.index(sorgu) % len(renkler)]
         for x, y in zip((kx + ox) * cs, (ky + oy) * cs):
             cv2.circle(gor, pik(x, y), 2, rk, -1)
         cv2.arrowedLine(gor, pik(hx, hy), pik(hx + 0.3 * math.cos(yaw), hy + 0.3 * math.sin(yaw)), rk, 2, tipLength=0.4)

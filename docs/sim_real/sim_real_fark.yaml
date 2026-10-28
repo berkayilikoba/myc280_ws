@@ -1,0 +1,133 @@
+taban_tepki:
+  gercek_v:
+    gecikme_s: 0.0
+    kazanc: 0.996
+    r2: 0.916
+    rmse: 0.0211
+  sim_v:
+    gecikme_s: 0.2
+    kazanc: 0.996
+    r2: 0.996
+    rmse: 0.0041
+  gercek_w:
+    gecikme_s: 0.04
+    kazanc: 0.989
+    r2: 0.975
+    rmse: 0.0373
+  sim_w:
+    gecikme_s: 0.26
+    kazanc: 0.981
+    r2: 0.975
+    rmse: 0.0362
+hiz_farki_sim_eksi_gercek:
+  v_rmse_m_s: 0.0224
+  w_rmse_rad_s: 0.0635
+  v_ort: 0.0033
+  w_ort: -0.0004
+yorunge:
+  yol_m_gercek: 9.729
+  yol_m_sim: 6.258
+  net_donus_derece_gercek: 1792.2
+  net_donus_derece_sim: 1792.4
+  son_konum_gercek:
+  - 0.01
+  - 0.064
+  - -0.191
+  son_konum_sim:
+  - -0.029
+  - 0.011
+  - -0.133
+  baslangic_gercek:
+  - 0.048
+  - 0.001
+  - -0.055
+  baslangic_sim:
+  - -0.0
+  - 0.0
+  - -0.0
+odom:
+  gercek:
+    k_w: 0.9921
+    k_v: 1.0162
+    tur_sonu_yon_farki_derece: -7.77
+  sim:
+    k_w: 0.9954
+    k_v: 1.0188
+    tur_sonu_yon_farki_derece: -8.25
+imu:
+  gercek:
+    hz: 92.9
+    durgun_jiro_sigma:
+    - 0.0008
+    - 0.00165
+    - 0.00093
+    durgun_ivme_sigma:
+    - 0.0262
+    - 0.0241
+    - 0.0252
+    durgun_ivme_ort:
+    - -0.152
+    - -0.102
+    - 10.044
+    hareket_gz_olcek: 1.0003
+    hareket_gz_artik_rms: 0.0472
+    hareket_ivme_sigma:
+    - 0.253
+    - 0.268
+    - 0.083
+  sim:
+    hz: 73.3
+    durgun_jiro_sigma:
+    - 0.00072
+    - 0.00186
+    - 0.00076
+    durgun_ivme_sigma:
+    - 0.0252
+    - 0.0253
+    - 0.026
+    durgun_ivme_ort:
+    - -0.133
+    - -0.091
+    - 10.036
+    hareket_gz_olcek: 0.9992
+    hareket_gz_artik_rms: 0.0467
+    hareket_ivme_sigma:
+    - 0.278
+    - 0.198
+    - 0.085
+lidar_baslangic:
+  aci_kutusu: 253
+  medyan_fark_cm: -2.41
+  mutlak_fark_medyan_cm: 3.14
+  5cm_ici_%: 78.3
+  20cm_disi_%: 8.7
+  gecerli_oran_gercek: 0.967
+  gecerli_oran_sim: 0.968
+  tarama_sayisi:
+  - 31
+  - 30
+  baslangic_yon_farki_derece_duzeltildi: -3.16
+  baslangic_konum_farki_cm_duzeltilmedi: 4.8
+derinlik_baslangic:
+  gecerli_gercek: 0.59
+  gecerli_sim: 0.337
+  ikisi_gecerli: 0.271
+  mutlak_fark_medyan_cm: 15.9
+  10cm_ici_%: 15.4
+  bantlar:
+    0.3-1m:
+      piksel_%: 2.8
+      medyan_fark_cm: -29.7
+      mutlak_medyan_cm: 29.7
+    1-2m:
+      piksel_%: 45.9
+      medyan_fark_cm: -14.0
+      mutlak_medyan_cm: 14.0
+    2-4m:
+      piksel_%: 33.6
+      medyan_fark_cm: -1.2
+      mutlak_medyan_cm: 24.6
+    4-8m:
+      piksel_%: 17.7
+      medyan_fark_cm: 12.3
+      mutlak_medyan_cm: 14.9

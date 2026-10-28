@@ -52,6 +52,11 @@ def generate_launch_description():
         '/usr/share/gazebo-11/models',
         os.path.expanduser('~/.gazebo/models'),
     ]
+    # limo_car/models: gerçek odanın 3B modeli (model://lab_oda_3b, saha/oda/oda_kur.sh)
+    try:
+        gazebo_model_paths.append(os.path.join(FindPackageShare(package='limo_car').find('limo_car'), 'models'))
+    except Exception:
+        pass
     current_model_path = os.environ.get('GAZEBO_MODEL_PATH', '')
     if current_model_path:
         gazebo_model_paths.append(current_model_path)
@@ -254,5 +259,19 @@ def generate_launch_description():
         package='limo_kinematics', executable='taban_modeli',
         name='taban_modeli', output='screen',
         parameters=[{'use_sim_time': use_sim_time}]))
+    # Diff: gerçek sensör kusurları (odom ölçek hatası, jiroskop nicemleme, D435 derinlik gürültüsü/boşlukları);
+    # /odom ve odom TF'i bu düğümden gelir, Gazebo gerçek konumu /odom_gercek (limo_kinematics/sensor_modeli_dugumu.py)
+    ld.add_action(DeclareLaunchArgument('odom_profil', default_value='teker', choices=['teker', 'vio', 'vio_kotu'],
+                                        description='odom hata profili: teker (ölçülen) | vio | vio_kotu (stres testi)'))
+    ld.add_action(DeclareLaunchArgument('odom_hatasi', default_value='true',
+                                        description='false: /odom = Gazebo gerçek konumu (eski davranış)'))
+    for bolum in ('odom_imu', 'derinlik', 'renk'):   # ayrı süreçler: görüntü çözümü odom/IMU'yu geciktirmesin
+        ld.add_action(Node(
+            condition=IfCondition(PythonExpression(["'", mode, "' != 'ackermann'"])),
+            package='limo_kinematics', executable='sensor_modeli',
+            name=f'sensor_modeli_{bolum}', output='screen',
+            parameters=[{'use_sim_time': use_sim_time, 'bolum': bolum,
+                         'odom_hatasi': ParameterValue(LaunchConfiguration('odom_hatasi'), value_type=bool),
+                         'odom_profil': LaunchConfiguration('odom_profil')}]))
 
     return ld

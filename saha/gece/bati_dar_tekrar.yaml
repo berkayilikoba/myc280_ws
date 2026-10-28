@@ -1,0 +1,9 @@
+# kuzeydogu -> bati_dar bacağı 3 tekrar
+baslangic: {x: 0.0, y: 0.0, yaw_derece: 0.0}
+hedefler:
+  - {ad: kuzeydogu_0, x: 4.2, y: 2.3, yaw_derece: 0.0}
+  - {ad: bati_dar_0, x: -1.5, y: 1.0, yaw_derece: 90.0}
+  - {ad: kuzeydogu_1, x: 4.2, y: 2.3, yaw_derece: 0.0}
+  - {ad: bati_dar_1, x: -1.5, y: 1.0, yaw_derece: 90.0}
+  - {ad: kuzeydogu_2, x: 4.2, y: 2.3, yaw_derece: 0.0}
+  - {ad: bati_dar_2, x: -1.5, y: 1.0, yaw_derece: 90.0}

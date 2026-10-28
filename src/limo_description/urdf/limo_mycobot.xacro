@@ -12,10 +12,15 @@
 
     <xacro:include filename="$(find mycobot_description)/urdf/mycobot/mycobot.urdf.xacro" />
 
+    <!-- Kol tabanı aracın üst plakasında (27.10.2026, kullanıcı: kol araca, arabanın üstüne takılı). base_link yerden
+         0.15 m; üst plaka yerden ~0.19 m (limo_base.stl düz üst yüzeyi) -> kol_z 0.04. Eski değer 0 (kol tabanı
+         gövdenin içinde, yerden 0.15 m) idi. kol_x / kol_z fiziksel olarak ölçülmeli. -->
+    <xacro:arg name="kol_x" default="-0.01" />
+    <xacro:arg name="kol_z" default="0.04" />
     <joint name="limo_mycobot" type="fixed">
         <parent link="base_link" />
         <child link="joint1" />
-        <origin xyz="-0.01 0.0 0.0" rpy="0 0 0" />
+        <origin xyz="$(arg kol_x) 0.0 $(arg kol_z)" rpy="0 0 0" />
     </joint>
 
 </robot>

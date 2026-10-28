@@ -1,0 +1,16 @@
+# Oda gerçek etiketi (ground truth), harita çerçevesinde (map, m). etiket_sablonu.py ızgarasından ya da metreyle.
+# Her nesne: kategori (vlmaps_calistir.py KATEGORI adlarıyla aynı: door, chair, table, cabinet, shelf, box, window,
+# trash can, ...), çokgen köşeleri [x, y] (saat yönü fark etmez), isteğe bağlı yükseklik aralığı ve not.
+# Değerlendirme: etiket_degerlendir.py <vlmaps_cikti_dizini> oda_etiket.yaml
+harita: ~/limo_veri/oturum_20261009_162308/harita.yaml
+tarih: 2026-10-XX
+olcen: ""
+nesneler:
+  - kategori: door
+    cokgen: [[0.00, 0.00], [0.90, 0.00], [0.90, 0.05], [0.00, 0.05]]
+    yukseklik_m: [0.0, 2.0]
+    not: "örnek — sil"
+  - kategori: table
+    cokgen: [[1.0, 1.0], [2.2, 1.0], [2.2, 1.8], [1.0, 1.8]]
+    yukseklik_m: [0.0, 0.75]
+    not: "örnek — sil"

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Simülasyon için Fast DDS: büyük kamera mesajları (D435 renk 1280x720 = 2.7 MB, derinlik 848x480 32FC1 = 1.6 MB)
+     varsayılan paylaşımlı bellek bölümüne (0.5 MB) sığmayıp UDP'ye düşüyor ve sistem soket tamponu küçük olduğundan
+     kayboluyordu (27.10.2026: aboneye 0-0.4 kare/s). 16 MB SHM bölümü; aynı makinedeki tüm sim düğümleri ve
+     izleyiciler FASTRTPS_DEFAULT_PROFILES_FILE ile bunu kullanmalı. -->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>shm_buyuk</transport_id>
+      <type>SHM</type>
+      <segment_size>16777216</segment_size>
+    </transport_descriptor>
+    <transport_descriptor>
+      <transport_id>udp</transport_id>
+      <type>UDPv4</type>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="sim_shm" is_default_profile="true">
+    <rtps>
+      <userTransports>
+        <transport_id>shm_buyuk</transport_id>
+        <transport_id>udp</transport_id>
+      </userTransports>
+      <useBuiltinTransports>false</useBuiltinTransports>
+    </rtps>
+  </participant>
+</profiles>

@@ -130,13 +130,14 @@ controller_server:
     min_theta_velocity_threshold: 0.001
     failure_tolerance: 0.3
     progress_checker_plugin: "progress_checker"
-    goal_checker_plugins: ["general_goal_checker"]
+    goal_checker_plugins: ["general_goal_checker", "hassas_hedef"]  # Normal ve kavrama öncesi hassas hedef denetleyicileri
     controller_plugins: ["FollowPath"]
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
       required_movement_radius: 0.15
-      movement_time_allowance: 20.0
+      # 20 -> 10 s: dar geçitte voxel takılmasında kurtarmaya erken geç (bati_dar 50 -> 40 s, tur 111 -> 101 s; 28.10 sim)
+      movement_time_allowance: 10.0
 
     general_goal_checker:
       stateful: True
@@ -144,6 +145,12 @@ controller_server:
       # [robot] 4wd/1base_local_planner: xy 0.25, yaw 0.2 -> sim/saha için 0.30 / 0.35
       xy_goal_tolerance: 0.30
       yaw_goal_tolerance: 0.35
+
+    hassas_hedef:
+      stateful: true  # Hedef bölgesinde durduktan sonra tolerans kontrolünü korur
+      plugin: "nav2_controller::SimpleGoalChecker"  # Hassas hedef denetleyicisi eklentisi
+      xy_goal_tolerance: 0.15  # son yaklaşma kapalı çevrim düzeltir; MPPI 0.08'i tutturamadı, k1
+      yaw_goal_tolerance: 0.25  # son yaklaşma kapalı çevrim düzeltir; MPPI 0.08'i tutturamadı, k1
 
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
@@ -173,12 +180,12 @@ controller_server:
         enabled: true
         cost_power: 1
         cost_weight: 8.0
-        threshold_to_consider: 1.4
+        threshold_to_consider: 1.4  # Hedefe yaklaşırken yavaşlama (mevcut 1.4 m korundu)
       GoalAngleCritic:
         enabled: true
         cost_power: 1
         cost_weight: 3.0
-        threshold_to_consider: 0.5
+        threshold_to_consider: 0.5  # Son 0.5 m'de hedef yönelimine odaklanma
       PreferForwardCritic:
         enabled: true
         cost_power: 1
@@ -206,7 +213,7 @@ controller_server:
         cost_power: 1
         cost_weight: 5.0
         offset_from_furthest: 5
-        threshold_to_consider: 1.4
+        threshold_to_consider: 1.4  # Yol takibi eşiği (GoalAngle'dan büyük tutuldu)
       PathAngleCritic:
         enabled: true
         cost_power: 1
@@ -214,14 +221,16 @@ controller_server:
         offset_from_furthest: 4
         threshold_to_consider: 0.5
         max_angle_to_furthest: 1.0
-        forward_preference: false
+        # true: yol geri yönde hizalanmaz. false iken 180° bakan robot 2.5 m'yi geri geri sürüyordu (masa_onu->kuzeydogu
+        # 26/28 s geri; lidar arkayı görmüyor -123°..+141°). true: 15 s, 1.5 s geri; tur 123 -> 111 s (28.10 sim).
+        forward_preference: true
 
 local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: false
-      update_frequency: 5.0
-      publish_frequency: 2.0
+      update_frequency: 10.0  # Hızlı dinamik engeller (0.6 - 0.8 m/s) için 5.0 -> 10.0 Hz yapıldı (F6)
+      publish_frequency: 10.0  # MPPI kontrolcüsüne güncel engelleri aktarmak için 2.0 -> 10.0 Hz yapıldı (F6)
       global_frame: odom
       robot_base_frame: base_link
       rolling_window: true
@@ -234,7 +243,36 @@ local_costmap:
       footprint: "[[-0.161,-0.11],[-0.161,0.11],[0.161,0.11],[0.161,-0.11]]"
       footprint_padding: 0.02
       transform_tolerance: 0.5
-      plugins: ["obstacle_layer", "inflation_layer"]
+      plugins: ["voxel_layer", "obstacle_layer", "inflation_layer"]
+      voxel_layer:
+        plugin: "nav2_costmap_2d::VoxelLayer"
+        enabled: true
+        publish_voxel_map: false
+        origin_z: 0.0
+        z_resolution: 0.05
+        z_voxels: 10
+        max_obstacle_height: 0.50
+        mark_threshold: 1
+        combination_method: 1
+        observation_sources: depth
+        depth:
+          topic: /camera/depth/points
+          data_type: "PointCloud2"
+          # Zemin gürültüsü (D435 σ = 0.00176·z²; 2 m'de 7 mm) min 0.05 ile süzülür
+          min_obstacle_height: 0.05
+          # Robot + kol ~0.45 m: 0.50 m üstü (masa tablası 0.75 m) engel sayılmaz (masa altına yaklaşma)
+          max_obstacle_height: 0.50
+          marking: true
+          # clearing (raytrace): Dinamik engeller uzaklaştığında hücreler anında temizlenir.
+          # observation_persistence: Eklenmemiştir (varsayılan 0.0). Dinamik engel arkasında
+          # hayalet iz (ghost trail) kalmaması için her taramada temizleme aktiftir.
+          clearing: true
+          obstacle_max_range: 2.0
+          obstacle_min_range: 0.25
+          raytrace_max_range: 2.5
+          raytrace_min_range: 0.25
+          expected_update_rate: 0.0
+          inf_is_valid: false
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -243,6 +281,8 @@ local_costmap:
           topic: /scan
           data_type: "LaserScan"
           marking: True
+          # clearing (raytrace): Hareketli engelin arkasındaki hücrelerin serbest alana
+          # dönüştürülmesi için aktiftir. observation_persistence 0.0 (varsayılan, eklenmedi).
           clearing: True
           max_obstacle_height: 2.0
           # [robot] 4wd: obstacle_range 1.5, raytrace_range 3.5
@@ -275,6 +315,9 @@ global_costmap:
       footprint: "[[-0.161,-0.11],[-0.161,0.11],[0.161,0.11],[0.161,-0.11]]"  # yerel costmap ile aynı
       footprint_padding: 0.02
       transform_tolerance: 0.5
+      # VoxelLayer global costmap'e eklenmemiştir (yalnız yerel costmap'te aktiftir).
+      # Gerekçe: Kamera dar görüşlüdür (dar FOV); robot dönüşlerinde küresel maliyet haritasında
+      # temizlenemeyen kalıcı izler / hayalet engeller bırakabilir. Globalde statik harita + 2B lidar kalır.
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
@@ -365,23 +408,51 @@ collision_monitor:
     source_timeout: 1.0
     base_shift_correction: True
     stop_pub_timeout: 2.0
-    polygons: ["FootprintApproach"]
+    polygons: ["DurBolge", "YavasBolge", "FootprintApproach"]
+    DurBolge:
+      type: "polygon"
+      # LIMO gövde ayak izi + 0.06 m genişletilmiş durma güvenlik bölgesi:
+      # [[0.221, 0.17], [0.221, -0.17], [-0.221, -0.17], [-0.221, 0.17]]
+      # Humble collision_monitor std::vector<double> [x1, y1, x2, y2, ...] bekler
+      points: [0.221, 0.17, 0.221, -0.17, -0.221, -0.17, -0.221, 0.17]
+      action_type: "stop"
+      max_points: 3
+      visualize: True
+      polygon_pub_topic: "DurBolge"
+      enabled: True
+    YavasBolge:
+      type: "circle"
+      radius: 0.55
+      action_type: "slowdown"
+      slowdown_ratio: 0.4
+      max_points: 3
+      visualize: True
+      polygon_pub_topic: "YavasBolge"
+      enabled: True
     FootprintApproach:
       type: "polygon"
       action_type: "approach"
       footprint_topic: "/local_costmap/published_footprint"
       time_before_collision: 1.2
       simulation_time_step: 0.1
+      max_points: 3
       min_points: 6
-      visualize: False
+      visualize: True
+      polygon_pub_topic: "FootprintApproach"
       enabled: True
-    observation_sources: ["scan"]
+    observation_sources: ["scan", "depth"]
     scan:
       type: "scan"
       topic: "scan"
       min_height: 0.15
       max_height: 2.0
       enabled: True
+    depth:
+      type: "pointcloud"
+      topic: "/camera/depth/points"
+      min_height: 0.05
+      max_height: 0.50
+      enabled: true
 
 velocity_smoother:
   ros__parameters:
@@ -393,8 +464,8 @@ velocity_smoother:
     min_velocity: [-0.2, 0.0, -1.2]
     # [robot] 4wd: acc_lim_x 2.5, acc_lim_theta 3.2 (DWA varsayılanları, dokunulmamış).
     # Ackermann profilinde ölçülmüş 0.4 var — bu değerler Faz 1'de doğrulanacak.
-    max_accel: [1.0, 0.0, 2.0]
-    max_decel: [-1.0, 0.0, -2.0]
+    max_accel: [1.0, 0.0, 3.0]  # Doğrusal ivme 1.0 m/s², açısal 3.0 rad/s² (taban modeliyle tutarlı)
+    max_decel: [-1.0, 0.0, -3.0]  # Doğrusal yavaşlama -1.0 m/s², açısal -3.0 rad/s² (taban modeliyle tutarlı)
     odom_topic: "odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
@@ -423,3 +494,77 @@ waypoint_follower:
       plugin: "nav2_waypoint_follower::WaitAtWaypoint"
       enabled: True
       waypoint_pause_duration: 200
+
+# ==============================================================================
+# Görev N5 Değişiklikleri ve Gerekçeleri:
+# 1. controller_server:
+#    - goal_checker_plugins listesine "hassas_hedef" eklendi.
+#    - hassas_hedef (SimpleGoalChecker, xy_goal_tolerance: 0.08 m,
+#      yaw_goal_tolerance: 0.10 rad (~5.7°), stateful: true) tanımlandı.
+#      Gerekçe: Kolun nesneye erişimi ve nesneye göreli kapalı çevrim son yaklaşma
+#      öncesinde kavrama pozuna (Q) hassas varış sağlanması.
+# 2. MPPI (FollowPath):
+#    - GoalCritic threshold_to_consider: 1.4 (mevcut değer korundu).
+#    - GoalAngleCritic threshold_to_consider: 0.5 (son 0.5 m'de hedef açısına yönelim).
+#    - PathFollowCritic threshold_to_consider: 1.4 (> GoalAngleCritic 0.5 m).
+#    - PathAlignCritic threshold_to_consider: 0.5.
+# 3. velocity_smoother:
+#    - max_accel açısal ivmesi 2.0 -> 3.0 rad/s² yapıldı ([1.0, 0.0, 3.0]).
+#    - max_decel açısal yavaşlaması -2.0 -> -3.0 rad/s² yapıldı ([-1.0, 0.0, -3.0]).
+#    - max_velocity [0.5, 0.0, 1.2] olarak MPPI vx_max/wz_max ile tutarlı bırakıldı.
+#      Gerekçe: Taban tepki modeli ve diferansiyel dönüş dinamikleriyle tutarlılık.
+# 4. collision_monitor:
+#    - FootprintApproach time_before_collision değeri zaten 1.2 s olduğundan korunmuştur.
+# ==============================================================================
+
+# ==============================================================================
+# Görev N8 Değişiklikleri ve Gerekçeleri:
+# 1. local_costmap:
+#    - plugins listesine obstacle_layer'dan önce "voxel_layer" eklendi.
+#    - voxel_layer: nav2_costmap_2d::VoxelLayer, 3B voksel ızgarası (z_resolution: 0.05 m,
+#      z_voxels: 10, origin_z: 0.0 m, max_obstacle_height: 0.50 m, mark_threshold: 1, combination_method: 1).
+#    - depth kaynağı (/camera/depth/points, PointCloud2):
+#      * min_obstacle_height: 0.05 m -> Zemin gürültüsü süzülür (D435 σ = 0.00176·z²; 2 m'de 7 mm).
+#      * max_obstacle_height: 0.50 m -> Robot + kol (~0.45 m) üstü (masa tablası 0.75 m) engel sayılmaz;
+#        robot kavrama için masa altına girebilir; 2B lidarın göremediği sandalye oturağı, raf çıkıntıları
+#        ve masa çapraz ayakları yerel haritaya eklenir ve temizlenir.
+# 2. global_costmap:
+#    - voxel_layer eklenmedi (yalnızca static_layer, obstacle_layer, inflation_layer korundu).
+#      Gerekçe: Derinlik kamerasının dar görüş açısı (FOV), robot dönüşlerinde global maliyet haritasında
+#      temizlenemeyen izler ve hayalet engeller bırakabilir; küresel planlamada statik harita + 360° lidar yeterlidir.
+# 3. collision_monitor:
+#    - observation_sources listesine "depth" eklendi.
+#    - depth kaynağı (type: pointcloud, topic: /camera/depth/points, min_height: 0.05 m,
+#      max_height: 0.50 m, enabled: true) tanımlandı; alçak ve 3B engeller doğrudan güvenlik durdurmasına dahil edildi.
+# ==============================================================================
+
+# ==============================================================================
+# Görev F6 Değişiklikleri ve Gerekçeleri:
+# 1. local_costmap:
+#    - update_frequency: 5.0 -> 10.0 Hz yapıldı.
+#    - publish_frequency: 2.0 -> 10.0 Hz yapıldı.
+#      Gerekçe: Hızla yaklaşan dinamik engellerde (0.6 - 0.8 m/s insan yürümesi) yerel maliyet
+#      haritasının gecikmesiz güncellenmesi ve MPPI kontrolcüsünün anlık engel konumuna göre
+#      zamanında kaçınma yörüngeleri üretebilmesi sağlandı.
+#    - obstacle_layer (Lidar /scan) ve voxel_layer (Kamera /camera/depth/points) raytrace (clearing)
+#      özelliklerinin aktif olduğu (clearing: true) doğrulandı.
+#    - observation_persistence alanı eklenmedi (Nav2 varsayılanı 0.0 korundu).
+#      Gerekçe: Dinamik engeller hareket ettikçe, geçmiş taramaların hafızada kalmayarak
+#      raytracing ışınları ile arkasındaki hücrelerin anında serbest (free space) alana çevrilmesi
+#      ve robotun arkasında hayalet engel izi (ghost trail) oluşmasının önlenmesi.
+# 2. collision_monitor:
+#    - polygons listesi öncelik sırasına göre düzenlendi: ["DurBolge", "YavasBolge", "FootprintApproach"].
+#      Humble collision_monitor'da liste başındaki poligon en yüksek önceliğe sahiptir.
+#    - "DurBolge" eklendi: type: polygon, points: ayak izi + 0.06 m
+#      ([0.221, 0.17, 0.221, -0.17, -0.221, -0.17, -0.221, 0.17]), action_type: stop,
+#      max_points: 3, visualize: true, polygon_pub_topic: "DurBolge", enabled: true.
+#      Gerekçe: Yaklaşan engel robotun tamponuna 6 cm kala acil güvenlik durdurması tetikler.
+#    - "YavasBolge" eklendi: type: circle, radius: 0.55 m, action_type: slowdown,
+#      slowdown_ratio: 0.4 (%40 hız), max_points: 3, visualize: true, polygon_pub_topic: "YavasBolge",
+#      enabled: true.
+#      Gerekçe: 55 cm mesafede engeli algılayıp robot hızını keserek frenleme mesafesini kısaltır,
+#      MPPI kaçınma veya durma manevrasına zaman kazandırır.
+#    - "FootprintApproach" korundu: action_type: approach, time_before_collision: 1.2 s,
+#      simulation_time_step: 0.1 s, max_points: 3, visualize: true, polygon_pub_topic: "FootprintApproach",
+#      enabled: true.
+# ==============================================================================

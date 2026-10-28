@@ -1,0 +1,118 @@
+# kol_erisim.py çıktısı: myCobot 280 kavrama noktası erişimi, base_footprint çerçevesi
+tutucu_m: 0.1
+sektor_derece: 15.0
+aci_tol_derece: 25.0
+on_kenar_m: 0.17
+kol_tabani_base_footprint:
+- 0.0
+- 0.0
+- 0.0
+bantlar:
+- z_m:
+  - 0.0
+  - 0.05
+  tur: ust
+  ornek: 45
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.177
+  - 0.203
+  - 0.231
+- z_m:
+  - 0.0
+  - 0.05
+  tur: yan
+  ornek: 14
+  erisilir: false
+- z_m:
+  - 0.05
+  - 0.15
+  tur: ust
+  ornek: 276
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.18
+  - 0.229
+  - 0.284
+- z_m:
+  - 0.05
+  - 0.15
+  tur: yan
+  ornek: 2538
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.179
+  - 0.216
+  - 0.288
+- z_m:
+  - 0.15
+  - 0.3
+  tur: ust
+  ornek: 602
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.178
+  - 0.23
+  - 0.301
+- z_m:
+  - 0.15
+  - 0.3
+  tur: yan
+  ornek: 13068
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.184
+  - 0.232
+  - 0.329
+- z_m:
+  - 0.3
+  - 0.45
+  tur: ust
+  ornek: 202
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.174
+  - 0.207
+  - 0.27
+- z_m:
+  - 0.3
+  - 0.45
+  tur: yan
+  ornek: 19633
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.183
+  - 0.233
+  - 0.331
+- z_m:
+  - 0.45
+  - 0.6
+  tur: ust
+  ornek: 0
+  erisilir: false
+- z_m:
+  - 0.45
+  - 0.6
+  tur: yan
+  ornek: 13033
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.181
+  - 0.215
+  - 0.295
+- z_m:
+  - 0.6
+  - 0.8
+  tur: ust
+  ornek: 0
+  erisilir: false
+- z_m:
+  - 0.6
+  - 0.8
+  tur: yan
+  ornek: 406
+  erisilir: true
+  yatay_m_p5_p50_p95:
+  - 0.174
+  - 0.192
+  - 0.219

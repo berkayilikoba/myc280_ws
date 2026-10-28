@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+<!-- Intel RealSense D435, gerçek LIMO'daki gibi (27.10.2026 ölçümleri, saha/config/sim_gercek_param.yaml):
+     çerçeveler realsense2_camera sürücüsüyle aynı: camera_link (= sol IR / derinlik merkezi) -> camera_depth_frame ->
+     camera_depth_optical_frame; camera_link -> camera_color_frame (y +0.0148, fabrika dış kalibrasyonu) ->
+     camera_color_optical_frame. Gövde ölçüleri Intel realsense-ros _d435.urdf.xacro.
+     Konular gerçekteki gibi: /camera/color/image_raw (+camera_info) ve /camera/depth/image_raw (16UC1, mm).
+     Renk ve derinlik Gazebo'dan /camera/color_sim/... ve /camera/depth_sim/... gelir; limo_kinematics sensor_modeli
+     düğümü gerçek D435 bozulma modeliyle /camera/color/... ve /camera/depth/... yayınlar.
+     Kayıt profili: renk 1280x720, derinlik 848x480, 15 Hz (D435_AYAR=vlmaps2). -->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro name="limo_d435" params="parent *joint_pose renk_g:=1280 renk_y:=720 derinlik_g:=848 derinlik_y:=480 hz:=15">
+    <link name="camera_link">
+      <inertial>
+        <mass value="0.072"/>
+        <origin xyz="0 0 0"/>
+        <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+      </inertial>
+      <!-- gövde 90x25x25 mm; camera_link ön camın 4.3 mm gerisinde, gövde ortasının 17.5 mm solunda -->
+      <visual>
+        <origin xyz="-0.0082 -0.0175 0" rpy="0 0 0"/>
+        <geometry><box size="0.025 0.090 0.025"/></geometry>
+        <material name="d435_gri"><color rgba="0.55 0.55 0.58 1"/></material>
+      </visual>
+      <collision>
+        <origin xyz="-0.0082 -0.0175 0" rpy="0 0 0"/>
+        <geometry><box size="0.025 0.090 0.025"/></geometry>
+      </collision>
+    </link>
+    <joint name="camera_joint" type="fixed">
+      <xacro:insert_block name="joint_pose"/>
+      <parent link="${parent}"/>
+      <child link="camera_link"/>
+    </joint>
+
+    <link name="camera_depth_frame"/>
+    <joint name="camera_depth_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <parent link="camera_link"/>
+      <child link="camera_depth_frame"/>
+    </joint>
+    <link name="camera_depth_optical_frame"/>
+    <joint name="camera_depth_optical_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="-1.5707963 0 -1.5707963"/>
+      <parent link="camera_depth_frame"/>
+      <child link="camera_depth_optical_frame"/>
+    </joint>
+    <link name="camera_color_frame"/>
+    <joint name="camera_color_joint" type="fixed">
+      <origin xyz="0 0.0148 0.0002" rpy="0 0 0"/>
+      <parent link="camera_link"/>
+      <child link="camera_color_frame"/>
+    </joint>
+    <link name="camera_color_optical_frame"/>
+    <joint name="camera_color_optical_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="-1.5707963 0 -1.5707963"/>
+      <parent link="camera_color_frame"/>
+      <child link="camera_color_optical_frame"/>
+    </joint>
+
+    <!-- Renk: gerçek fx 908.97 @1280 -> yatay FOV 1.22693 rad (70.3°); bozulma katsayıları sıfır (sürücü bildiriyor) -->
+    <gazebo reference="camera_color_frame">
+      <sensor name="d435_renk" type="camera">
+        <always_on>true</always_on>
+        <update_rate>${hz}</update_rate>
+        <camera name="color">
+          <horizontal_fov>1.22693</horizontal_fov>
+          <image><width>${renk_g}</width><height>${renk_y}</height><format>R8G8B8</format></image>
+          <clip><near>0.05</near><far>30</far></clip>
+        </camera>
+        <plugin name="d435_renk_eklenti" filename="libgazebo_ros_camera.so">
+          <ros><namespace>/camera</namespace></ros>
+          <camera_name>color_sim</camera_name>
+          <frame_name>camera_color_optical_frame</frame_name>
+        </plugin>
+      </sensor>
+    </gazebo>
+
+    <!-- Derinlik: gerçek fx 429.73 @848 -> yatay FOV 1.55737 rad (89.2°). Ham (gürültüsüz) -> sensor_modeli -->
+    <gazebo reference="camera_depth_frame">
+      <sensor name="d435_derinlik" type="depth">
+        <always_on>true</always_on>
+        <update_rate>${hz}</update_rate>
+        <camera name="depth">
+          <horizontal_fov>1.55737</horizontal_fov>
+          <image><width>${derinlik_g}</width><height>${derinlik_y}</height><format>L8</format></image>
+          <clip><near>0.1</near><far>12</far></clip>
+        </camera>
+        <plugin name="d435_derinlik_eklenti" filename="libgazebo_ros_camera.so">
+          <ros><namespace>/camera</namespace></ros>
+          <camera_name>depth_sim</camera_name>
+          <frame_name>camera_depth_optical_frame</frame_name>
+          <hack_baseline>0.0</hack_baseline>
+          <min_depth>0.1</min_depth>
+          <max_depth>12.0</max_depth>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+</robot>
