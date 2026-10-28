@@ -10,6 +10,16 @@ birakma:
   y: 0.0
   yaw_derece: 0.0
 
+sarj:
+  x: 0.0
+  y: 0.0
+  yaw_derece: 0.0
+
+pil:
+  uyari_v: 11.0
+  kritik_v: 10.5
+  tampon_s: 10.0
+
 nesneler:
   elma:            # doğu duvarı dibinde alçak (kol erişimi z ≤ 0.45); simde KAVRANABILIR ölçüldü (0.7 cm / 1.7°)
     x: 5.62

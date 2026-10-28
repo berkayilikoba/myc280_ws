@@ -10,6 +10,8 @@ Test kapsamı:
   - Bilinmeyen nesne adı -> 'HATA bilinmeyen nesne'
   - Aşama zaman aşımları (kavrama ve taşıma)
   - YAML yapılandırması yükleme ve bırakma pozu varsayılanı (yoksa ev)
+  - Pil farkındalığı ve şarja dönüş (BOSTA düşük pil, görev sürerken uyarı, kritik + nesne tutuluyor,
+    kritik + kavrama öncesi, tampon süresi, şarj sonrası eşik üstü, şarj yeniden deneme).
 """
 
 import pytest
@@ -19,6 +21,7 @@ from limo_autonomy.gorev_yoneticisi import (
     Eylem,
     GorevYoneticisi,
     NesneKonumu,
+    PilAyari,
     Poz2D,
     load_nesneler,
 )
@@ -29,6 +32,7 @@ NESNELER = {
 }
 EV = Poz2D(x=0.0, y=0.0, yaw_derece=0.0)
 BIRAKMA = Poz2D(x=1.0, y=0.5, yaw_derece=90.0)
+SARJ = Poz2D(x=0.0, y=0.0, yaw_derece=0.0)
 
 
 def mk(**kw):
@@ -36,13 +40,21 @@ def mk(**kw):
         nesneler=NESNELER,
         ev=EV,
         birakma=BIRAKMA,
+        sarj=SARJ,
         ayar=Ayar(
             kavrama_zaman_asimi=240.0,
             tasima_zaman_asimi=180.0,
             kol_zaman_asimi=30.0,
             eve_don_zaman_asimi=180.0,
+            sarj_zaman_asimi=180.0,
             max_kavrama_yeniden_dene=1,
             max_tasima_yeniden_dene=2,
+            max_sarj_yeniden_dene=2,
+        ),
+        pil_ayar=PilAyari(
+            uyari_v=11.0,
+            kritik_v=10.5,
+            tampon_s=10.0,
         ),
     )
     args.update(kw)
@@ -342,3 +354,222 @@ def test_load_nesneler_hatali_format(tmp_path):
     p.write_text("ev: {x: 0.0}\n")  # y eksik, nesneler eksik
     with pytest.raises(ValueError):
         load_nesneler(str(p))
+
+
+# ------------------------------------------------------------------ 8. Pil Farkındalığı ve Şarja Dönüş
+
+def test_bostada_dusuk_pil_sarja_git_ve_istek_reddi():
+    """BOSTA'da gerilim < uyari_v -> SARJA_GIT başlat ve yeni istekleri REDDET ('HATA pil düşük')."""
+    gy = mk()
+    assert gy.durum == 'BOSTA'
+
+    # Gerilim 10.8 V (< 11.0 V), tampon süresi 10 sn
+    gy.olay('pil', 10.8, t=0.0)
+    assert gy.durum == 'BOSTA'  # Henüz tampon süresi dolmadı
+
+    # 10 sn sonra tampon eşiği sağlandı
+    eylemler = gy.olay('pil', 10.8, t=10.0)
+    assert gy.durum == 'SARJA_GIT'
+    assert any(e.tur == 'durum' and 'SARJA_GIT' in e.veri for e in eylemler)
+    assert any(e.tur == 'nav_git' and e.veri == SARJ for e in eylemler)
+
+    # Yeni görev istekleri reddedilmeli
+    red = gy.istek('elma', t=12.0)
+    assert gy.durum == 'SARJA_GIT'
+    assert any(e.tur == 'durum' and 'HATA pil düşük' in e.veri for e in red)
+
+    # Geçiş geçmişte kayıtlı olmalı
+    assert any(eski == 'BOSTA' and yeni == 'SARJA_GIT' for _, eski, yeni, _ in gy.gecmis)
+
+
+def test_gorev_surerken_uyari_gorev_biter_sonra_sarj():
+    """Görev sürerken uyari_v altı: mevcut görevi BİTİR (yeni kabul etme), bitince SARJA_GIT."""
+    gy = mk()
+    gy.istek('elma', t=0.0)
+    assert gy.durum == 'KAVRAMAYA_GIT'
+
+    # Görev sürerken uyarı gerilimi (10.8 V) ve tampon süresi dolumu
+    gy.olay('pil', 10.8, t=5.0)
+    gy.olay('pil', 10.8, t=15.0)
+
+    # Aktif görev kesilmemeli
+    assert gy.durum == 'KAVRAMAYA_GIT'
+
+    # Bu esnada yeni görev isteği reddedilmeli
+    red = gy.istek('kutu', t=16.0)
+    assert any(e.tur == 'durum' and 'HATA pil düşük' in e.veri for e in red)
+
+    # Görev normal adımlarla ilerler
+    gy.olay('kavrama_durum', 'HAZIR', t=20.0)
+    assert gy.durum == 'KOL_KAVRA'
+    gy.olay('kol_sonuc', True, t=25.0)
+    assert gy.durum == 'TASI'
+    gy.olay('nav_sonuc', True, t=45.0)
+    assert gy.durum == 'KOL_BIRAK'
+    gy.olay('kol_sonuc', True, t=50.0)
+    assert gy.durum == 'EVE_DON'
+
+    # Eve varış gerçekleştiğinde görev biter ve hemen SARJA_GIT durumuna geçilir
+    eylemler = gy.olay('nav_sonuc', True, t=70.0)
+    assert gy.durum == 'SARJA_GIT'
+    assert any(e.tur == 'durum' and 'TAMAM' in e.veri for e in eylemler)
+    assert any(e.tur == 'durum' and 'SARJA_GIT' in e.veri for e in eylemler)
+    assert any(e.tur == 'nav_git' and e.veri == SARJ for e in eylemler)
+
+
+def test_kritik_pil_nesne_tutuluyor_birakmadan_sarj():
+    """kritik_v altı: nesne TUTULUYORSA nesneyi BIRAKMADAN doğrudan SARJA_GIT ('nesne tutuluyor')."""
+    gy = mk()
+    gy.istek('elma', t=0.0)
+    gy.olay('kavrama_durum', 'HAZIR', t=10.0)
+    gy.olay('kol_sonuc', True, t=15.0)
+    assert gy.durum == 'TASI'  # Nesne tutuluyor
+
+    # Kritik gerilim (10.2 V < 10.5 V)
+    gy.olay('pil', 10.2, t=20.0)
+    eylemler = gy.olay('pil', 10.2, t=30.0)
+
+    # Taşıma Nav2 eylemi iptal edilmeli, KOL_BIRAK YAPILMADAN doğrudan SARJA_GIT'e geçilmeli
+    assert gy.durum == 'SARJA_GIT'
+    assert any(e.tur == 'nav_iptal' for e in eylemler)
+    assert not any(e.tur == 'kol_birak' for e in eylemler)
+    assert any(e.tur == 'durum' and 'SARJA_GIT' in e.veri and 'nesne tutuluyor' in e.veri for e in eylemler)
+    assert any(e.tur == 'nav_git' and e.veri == SARJ for e in eylemler)
+
+
+def test_kritik_pil_kavrama_oncesi_iptal_ve_sarj():
+    """kritik_v altı: KAVRAMAYA_GIT ya da KOL_KAVRA öncesindeyse görevi iptal et (kavrama_iptal) ve SARJA_GIT."""
+    # 1. KAVRAMAYA_GIT aşamasında kritik pil
+    gy = mk()
+    gy.istek('elma', t=0.0)
+    assert gy.durum == 'KAVRAMAYA_GIT'
+
+    gy.olay('pil', 10.2, t=5.0)
+    eylemler = gy.olay('pil', 10.2, t=15.0)
+
+    assert gy.durum == 'SARJA_GIT'
+    assert any(e.tur == 'kavrama_iptal' for e in eylemler)
+    assert any(e.tur == 'durum' and 'SARJA_GIT' in e.veri for e in eylemler)
+    assert any(e.tur == 'nav_git' and e.veri == SARJ for e in eylemler)
+    assert gy.aktif_nesne is None
+
+    # 2. KOL_KAVRA aşamasında (kol henüz tutmadan) kritik pil
+    gy2 = mk()
+    gy2.istek('elma', t=0.0)
+    gy2.olay('kavrama_durum', 'HAZIR', t=10.0)
+    assert gy2.durum == 'KOL_KAVRA'
+
+    gy2.olay('pil', 10.2, t=12.0)
+    eylemler2 = gy2.olay('pil', 10.2, t=22.0)
+
+    assert gy2.durum == 'SARJA_GIT'
+    assert any(e.tur == 'kavrama_iptal' for e in eylemler2)
+    assert any(e.tur == 'durum' and 'SARJA_GIT' in e.veri for e in eylemler2)
+    assert any(e.tur == 'nav_git' and e.veri == SARJ for e in eylemler2)
+
+
+def test_tampon_suredenden_kisa_dusus_tetiklemez():
+    """tampon_s'den kısa gerilim düşüşleri durum değişikliğini tetiklemez."""
+    gy = mk()
+    assert gy.durum == 'BOSTA'
+
+    # t=0'da gerilim ani düşüş yaşasın (10.2 V kritik seviyeye kadar)
+    gy.olay('pil', 10.2, t=0.0)
+    assert gy.durum == 'BOSTA'
+
+    # 4 sn sonra hala düşük ama tampon (10 sn) dolmadı
+    gy.olay('pil', 10.2, t=4.0)
+    assert gy.durum == 'BOSTA'
+
+    # 7. saniyede gerilim normale döndü (12.2 V)
+    gy.olay('pil', 12.2, t=7.0)
+    assert gy.durum == 'BOSTA'
+
+    # 15. saniyede normal gerilim devam ediyor
+    gy.olay('pil', 12.2, t=15.0)
+    assert gy.durum == 'BOSTA'
+
+    # Robot şarja gitmemiş olmalı ve yeni görev kabul edebilmeli
+    eylemler = gy.istek('elma', t=16.0)
+    assert gy.durum == 'KAVRAMAYA_GIT'
+    assert any(e.tur == 'kavrama_hedef' for e in eylemler)
+
+
+def test_sarj_sonrasi_esik_ustu_bosta_ve_istek_kabul():
+    """SARJDA durumu: gerilim uyari_v + 0.4 V'u geçince BOSTA'ya dön ve istekleri yeniden kabul et."""
+    gy = mk()
+
+    # Düşük pil ile şarja git
+    gy.olay('pil', 10.8, t=0.0)
+    gy.olay('pil', 10.8, t=10.0)
+    assert gy.durum == 'SARJA_GIT'
+
+    # Şarj istasyonuna varış
+    eylemler_varis = gy.olay('nav_sonuc', True, t=25.0)
+    assert gy.durum == 'SARJDA'
+    assert any(e.tur == 'durum' and e.veri == 'SARJDA' for e in eylemler_varis)
+
+    # Şarj olurken gerilim henüz eşiği (11.0 + 0.4 = 11.4 V) geçmemişken
+    gy.olay('pil', 11.2, t=35.0)
+    assert gy.durum == 'SARJDA'
+    red = gy.istek('elma', t=36.0)
+    assert any(e.tur == 'durum' and 'HATA pil düşük' in e.veri for e in red)
+
+    # Gerilim 11.5 V (> 11.4 V) oldu -> BOSTA durumuna geçiş
+    eylemler_dolu = gy.olay('pil', 11.5, t=50.0)
+    assert gy.durum == 'BOSTA'
+    assert any(e.tur == 'durum' and e.veri == 'BOSTA' for e in eylemler_dolu)
+
+    # İstekler artık kabul edilir
+    kabul = gy.istek('elma', t=52.0)
+    assert gy.durum == 'KAVRAMAYA_GIT'
+    assert any(e.tur == 'kavrama_hedef' for e in kabul)
+
+
+def test_sarja_git_yeniden_deneme_ve_basarisiz_sarj():
+    """SARJA_GIT başarısızsa 2 kez yeniden dene, sonra 'BASARISIZ sarj' ve BOSTA'da kal (istek reddi sürer)."""
+    gy = mk()
+    gy.olay('pil', 10.8, t=0.0)
+    gy.olay('pil', 10.8, t=10.0)
+    assert gy.durum == 'SARJA_GIT'
+
+    # 1. başarısızlık -> 1. yeniden deneme
+    e1 = gy.olay('nav_sonuc', False, t=20.0)
+    assert gy.durum == 'SARJA_GIT'
+    assert any(e.tur == 'nav_git' and e.veri == SARJ for e in e1)
+
+    # 2. başarısızlık -> 2. yeniden deneme
+    e2 = gy.olay('nav_sonuc', False, t=35.0)
+    assert gy.durum == 'SARJA_GIT'
+    assert any(e.tur == 'nav_git' and e.veri == SARJ for e in e2)
+
+    # 3. başarısızlık -> denemeler bitti
+    e3 = gy.olay('nav_sonuc', False, t=50.0)
+    assert gy.durum == 'BOSTA'
+    assert any(e.tur == 'durum' and 'BASARISIZ sarj' in e.veri for e in e3)
+
+    # BOSTA durumunda olmasına rağmen şarj başarısız olduğu ve pil düşük kaldığı için istekler reddedilmeli
+    red = gy.istek('elma', t=55.0)
+    assert gy.durum == 'BOSTA'
+    assert any(e.tur == 'durum' and 'HATA pil düşük' in e.veri for e in red)
+
+
+def test_load_nesneler_sarj_ve_pil(tmp_path):
+    """YAML dosyasında sarj ve pil yapılandırması başarıyla yüklenmeli."""
+    p = tmp_path / 'nesneler_sarj.yaml'
+    p.write_text("""
+ev: {x: 0.0, y: 0.0, yaw_derece: 0.0}
+birakma: {x: 1.0, y: 1.0, yaw_derece: 90.0}
+sarj: {x: 2.0, y: 3.0, yaw_derece: 180.0}
+pil:
+  uyari_v: 11.2
+  kritik_v: 10.4
+  tampon_s: 8.0
+nesneler:
+  elma: {x: 0.5, y: 1.5, z: 0.8}
+""")
+    cfg = load_nesneler(str(p))
+    assert cfg['sarj'] == Poz2D(2.0, 3.0, 180.0)
+    assert cfg['pil_ayar'].uyari_v == 11.2
+    assert cfg['pil_ayar'].kritik_v == 10.4
+    assert cfg['pil_ayar'].tampon_s == 8.0

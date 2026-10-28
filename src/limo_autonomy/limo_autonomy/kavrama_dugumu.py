@@ -262,6 +262,73 @@ def kurtarma_durum_gecisi(
     return 'GECIS', kurtarma_sayisi + 1, aktif_aday_idx + 1, True
 
 
+def erken_kabul_durumu(
+    gecmis: list[tuple[float, float, float]] | list[Any],
+    xy: float = 0.20,
+    yaw: float = math.radians(20.0),
+    sure: float = 1.0,
+) -> bool:
+    """Robotun Q pozuna erken kabul eşikleri içinde yeterli süre kalıp kalmadığını belirler (ROS'suz saf fonksiyon).
+
+    Parametreler:
+        gecmis: Zaman damgalı (t, d, a) kayıtları listesi:
+                t: saniye (float),
+                d: xy mesafesi (metre veya cm, float),
+                a: yaw açısal farkı (radyan veya derece, float).
+        xy: Mesafe eşiği (metre veya cm, varsayılan 0.20 m).
+        yaw: Açısal fark eşiği (radyan veya derece, varsayılan 20° / ~0.349 rad).
+        sure: Eşik içinde kesintisiz kalınması gereken süre (saniye, varsayılan 1.0 s).
+
+    Döndürür:
+        bool: Son durum kesintisiz olarak en az 'sure' saniye eşikler içindeyse True, aksi halde False.
+    """
+    if not gecmis:
+        return False
+
+    xy_tol = float(xy) / 100.0 if float(xy) > 10.0 else float(xy)
+    yaw_tol = math.radians(float(yaw)) if abs(float(yaw)) > math.pi else abs(float(yaw))
+    sure_val = float(sure)
+
+    # Son kayıt eşik içinde değilse kesintisiz süre sıfırlanmıştır (sayaç sıfırlanır)
+    son_t, son_d, son_a = float(gecmis[-1][0]), float(gecmis[-1][1]), float(gecmis[-1][2])
+    if not (son_d <= xy_tol and son_a <= yaw_tol):
+        return False
+
+    # Sondan geriye doğru kesintisiz eşik içinde kalınan başlangıç zamanını bul
+    t_baslangic = son_t
+    for kayit in reversed(gecmis):
+        t, d, a = float(kayit[0]), float(kayit[1]), float(kayit[2])
+        if d <= xy_tol and a <= yaw_tol:
+            t_baslangic = t
+        else:
+            break
+
+    return (son_t - t_baslangic) >= (sure_val - 1e-9)
+
+
+def nav_q_durum_gecisi(
+    durum_kodu: str,
+    hedef_durum: str = 'SON_YAKLASMA',
+) -> tuple[str, bool]:
+    """NAV_Q durumundan çıkışta tek geçiş koruması sağlar (N13 mantığı).
+
+    İki ardışık çağrıda durum ilk çağrıda 'GECIS'e alınacağı için geçiş
+    aynı tikte veya yarış durumunda yalnızca bir kez tetiklenir.
+
+    Parametreler:
+        durum_kodu: Mevcut durum makinesi kodu ('NAV_Q', 'GECIS', 'SON_YAKLASMA', vb.).
+        hedef_durum: Geçilmek istenen durum ('SON_YAKLASMA' veya 'SONRAKI_ADAY').
+
+    Döndürür:
+        (yeni_durum, gecis_izni):
+            yeni_durum: 'GECIS' (durum NAV_Q ise) veya mevcut durum_kodu.
+            gecis_izni: Yalnızca mevcut durum 'NAV_Q' ise True, aksi halde False.
+    """
+    if durum_kodu != 'NAV_Q':
+        return durum_kodu, False
+    return 'GECIS', True
+
+
 # ---------------------------------------------------------------------------
 # Eylem (Action) İçin ROS'suz Saf Yardımcı Fonksiyonlar ve Sınıflar
 # ---------------------------------------------------------------------------
@@ -659,6 +726,14 @@ class KavramaDugumu(Node):
         q_yaw_val = float(p('q_kabul_yaw', 35.0).value)
         self.q_kabul_yaw = math.radians(q_yaw_val) if abs(q_yaw_val) > math.pi else q_yaw_val
 
+        # Q erken kabul ve NAV_Q zaman aşımı parametreleri (N15)
+        q_erken_xy_val = float(p('q_erken_xy', 0.20).value)
+        self.q_erken_xy = q_erken_xy_val / 100.0 if q_erken_xy_val > 10.0 else q_erken_xy_val
+        q_erken_yaw_val = float(p('q_erken_yaw', 20.0).value)
+        self.q_erken_yaw = math.radians(q_erken_yaw_val) if abs(q_erken_yaw_val) > math.pi else q_erken_yaw_val
+        self.q_erken_sure = float(p('q_erken_sure', 1.0).value)
+        self.nav_q_zaman_asimi = float(p('nav_q_zaman_asimi', 90.0).value)
+
         # Varsayılan hassas BT XML yolu
         try:
             from ament_index_python.packages import get_package_share_directory
@@ -724,6 +799,12 @@ class KavramaDugumu(Node):
         self.t_son_yaklasma_baslangic: rclpy.time.Time | None = None
         self.son_durum_log_zamani: float = 0.0
 
+        # NAV_Q erken kabul ve zaman aşımı durum değişkenleri (N15)
+        self.t_nav_q_baslangic: float = 0.0
+        self.nav_q_gecmis: list[tuple[float, float, float]] = []
+        self._nav_q_kalan_mesafe_m: float = 0.0
+        self._durum_kilit = threading.RLock()
+
         # Eylem Sunucusu Durum ve Eşzamanlılık Değişkenleri
         self._eylem_kilit = threading.RLock()
         self._eylem_aktif: bool = False
@@ -785,7 +866,12 @@ class KavramaDugumu(Node):
 
         durum_on_eki, ayrinti = durum_metni_ayristir(s)
         if durum_on_eki in ('PLAN', 'NAV_Q', 'KURTARMA'):
-            kalan = 0.20 if durum_on_eki == 'KURTARMA' else 0.0
+            if durum_on_eki == 'KURTARMA':
+                kalan = 0.20
+            elif durum_on_eki == 'NAV_Q':
+                kalan = getattr(self, '_nav_q_kalan_mesafe_m', 0.0)
+            else:
+                kalan = 0.0
             self._eylem_geri_bildirim_yayinla(
                 durum=durum_on_eki,
                 ayrinti=ayrinti,
@@ -840,9 +926,14 @@ class KavramaDugumu(Node):
         except Exception as e:
             self.get_logger().debug(f'Geri bildirim yayınlama hatası: {e}')
 
-    def tf2d(self, hedef: str, kaynak: str) -> tuple[float, float, float]:
+    def tf2d(self, hedef: str, kaynak: str, timeout_sec: float = 2.0) -> tuple[float, float, float]:
         """TF ağacından kaynak->hedef 2B (x, y, yaw) dönüşümünü çeker."""
-        t = self.tf.lookup_transform(hedef, kaynak, rclpy.time.Time(), rclpy.duration.Duration(seconds=2.0)).transform
+        t = self.tf.lookup_transform(
+            hedef,
+            kaynak,
+            rclpy.time.Time(),
+            rclpy.duration.Duration(seconds=timeout_sec),
+        ).transform
         return t.translation.x, t.translation.y, yaw_q(t.rotation)
 
     def _durdur(self) -> None:
@@ -1039,14 +1130,15 @@ class KavramaDugumu(Node):
     def _iptal_cb(self, _msg: Empty) -> None:
         """/kavrama/iptal sinyali: Nav2 hedefini iptal et, dur, 'HATA iptal'."""
         self.get_logger().info('Kavrama iptal isteği alındı')
-        if self.aktif_nav_goal is not None:
-            try:
-                self.aktif_nav_goal.cancel_goal_async()
-            except Exception:
-                pass
-            self.aktif_nav_goal = None
-        self._durdur()
-        self.durum_kodu = 'HATA'
+        with self._durum_kilit:
+            if self.aktif_nav_goal is not None:
+                try:
+                    self.aktif_nav_goal.cancel_goal_async()
+                except Exception:
+                    pass
+                self.aktif_nav_goal = None
+            self._durdur()
+            self.durum_kodu = 'HATA'
         self.durum('HATA iptal')
 
     def _hedef_cb(self, m: PointStamped) -> None:
@@ -1128,6 +1220,14 @@ class KavramaDugumu(Node):
         y = self.adaylar[self.aktif_aday_idx]
         (px, py, th), (qx, qy, _) = y.kavrama, y.oncesi
 
+        self.t_nav_q_baslangic = self._simdi_s()
+        self.nav_q_gecmis = []
+        try:
+            rx, ry, _ = self.tf2d('map', 'base_footprint', timeout_sec=0.05)
+            self._nav_q_kalan_mesafe_m = float(math.hypot(rx - qx, ry - qy))
+        except Exception:
+            self._nav_q_kalan_mesafe_m = 0.0
+
         self.durum_kodu = 'NAV_Q'
         self.durum(
             f'NAV_Q aday {self.aktif_aday_idx + 1}/{len(self.adaylar)}: '
@@ -1157,10 +1257,18 @@ class KavramaDugumu(Node):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.durum(f'NAV_Q hedef reddedildi (aday {self.aktif_aday_idx + 1})')
-            self._aday_basarisiz_isle('Nav2 hedef reddi')
+            self._nav_q_gecis_yap('SONRAKI_ADAY', neden='Nav2 hedef reddi')
             return
 
-        self.aktif_nav_goal = goal_handle
+        with self._durum_kilit:
+            if self.durum_kodu != 'NAV_Q':
+                try:
+                    goal_handle.cancel_goal_async()
+                except Exception:
+                    pass
+                return
+            self.aktif_nav_goal = goal_handle
+
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(self._nav_result_cb)
 
@@ -1168,11 +1276,10 @@ class KavramaDugumu(Node):
         self.aktif_nav_goal = None
         if self.durum_kodu != 'NAV_Q':
             return
-        self.durum_kodu = 'GECIS'
 
         status = future.result().status
         if status == 4:  # STATUS_SUCCEEDED
-            self._son_yaklasma_baslat()
+            self._nav_q_gecis_yap('SON_YAKLASMA')
         elif status != 5:  # Başarısızlık (iptal / STATUS_CANCELED hariç, örn. STATUS_ABORTED)
             # Robotun harita pozu Q'ya q_kabul_xy ve q_kabul_yaw içindeyse son yaklaşmaya geç
             yakin_kabul = False
@@ -1183,18 +1290,58 @@ class KavramaDugumu(Node):
                 yakin, d, a = q_yakin_mi((rx, ry, ryaw), (qx, qy, th), self.q_kabul_xy, self.q_kabul_yaw)
                 if yakin:
                     yakin_kabul = True
-                    self.durum(f'NAV_Q yakin_kabul ({d * 100:.1f} cm, {math.degrees(a):.1f}°)')
-                    self._son_yaklasma_baslat()
+                    mesaj = f'NAV_Q yakin_kabul ({d * 100:.1f} cm, {math.degrees(a):.1f}°)'
+                    self._nav_q_gecis_yap('SON_YAKLASMA', mesaj=mesaj)
                     return
             except Exception as e:
                 self.get_logger().warn(f'NAV_Q yakin_kabul TF/hesaplama hatası: {e}')
 
             if not yakin_kabul:
                 self.durum(f'NAV_Q başarısız durum {status} (aday {self.aktif_aday_idx + 1})')
-                self._aday_basarisiz_isle(f'Nav2 basarisiz ({status})')
+                self._nav_q_gecis_yap('SONRAKI_ADAY', neden=f'Nav2 basarisiz ({status})')
         else:
             self.durum(f'NAV_Q iptal edildi durum {status} (aday {self.aktif_aday_idx + 1})')
-            self._aday_basarisiz_isle(f'Nav2 iptal ({status})')
+            self._nav_q_gecis_yap('SONRAKI_ADAY', neden=f'Nav2 iptal ({status})')
+
+    def _nav_q_gecis_yap(
+        self,
+        hedef_durum: str,
+        mesaj: str | None = None,
+        neden: str = '',
+    ) -> bool:
+        """NAV_Q durumundan tek ve korumalı çıkış noktası (N13 geçiş koruması).
+
+        Parametreler:
+            hedef_durum: 'SON_YAKLASMA' veya 'SONRAKI_ADAY'.
+            mesaj: Geçiş öncesinde self.durum(...) ile yayınlanacak durum metni.
+            neden: 'SONRAKI_ADAY' için başarısızlık açıklaması.
+
+        Döndürür:
+            bool: Geçiş bu çağrı ile yapıldıysa True, durum NAV_Q olmadığı için atlandıysa False.
+        """
+        with self._durum_kilit:
+            yeni_durum, gecis_izni = nav_q_durum_gecisi(self.durum_kodu, hedef_durum)
+            if not gecis_izni:
+                return False
+            self.durum_kodu = yeni_durum  # 'GECIS'
+
+            # Varsa aktif Nav2 hedefini iptal et (iptal sonucunu bekleme)
+            if self.aktif_nav_goal is not None:
+                try:
+                    self.aktif_nav_goal.cancel_goal_async()
+                except Exception as e:
+                    self.get_logger().debug(f'Nav2 hedef iptal hatası: {e}')
+                self.aktif_nav_goal = None
+
+        if mesaj:
+            self.durum(mesaj)
+
+        if hedef_durum == 'SON_YAKLASMA':
+            self._son_yaklasma_baslat()
+        elif hedef_durum == 'SONRAKI_ADAY':
+            self._aday_basarisiz_isle(neden)
+
+        return True
 
     def _aday_basarisiz_isle(self, neden: str) -> None:
         """Nav2 aşamasında aday başarısız olursa sonraki adaya geçer."""
@@ -1312,10 +1459,83 @@ class KavramaDugumu(Node):
     # --- 50 Hz Denetim Döngüsü ---
 
     def _dongu_50hz(self) -> None:
-        if self.durum_kodu == 'SON_YAKLASMA':
+        if self.durum_kodu == 'NAV_Q':
+            self._dongu_nav_q()
+        elif self.durum_kodu == 'SON_YAKLASMA':
             self._dongu_son_yaklasma()
         elif self.durum_kodu == 'KURTARMA':
             self._dongu_kurtarma()
+
+    def _dongu_nav_q(self) -> None:
+        """NAV_Q 50 Hz döngüsü: erken kabul ve zaman aşımı denetimleri."""
+        if self.durum_kodu != 'NAV_Q':
+            return
+        if not self.adaylar or self.aktif_aday_idx >= len(self.adaylar):
+            return
+
+        simdi = self._simdi_s()
+        gecen_sure = simdi - self.t_nav_q_baslangic
+
+        y = self.adaylar[self.aktif_aday_idx]
+        qx, qy, th = y.oncesi[0], y.oncesi[1], y.theta
+
+        try:
+            rx, ry, ryaw = self.tf2d('map', 'base_footprint', timeout_sec=0.02)
+            tf_alindi = True
+        except Exception:
+            tf_alindi = False
+            rx, ry, ryaw = 0.0, 0.0, 0.0
+
+        if tf_alindi:
+            _, d, a = q_yakin_mi((rx, ry, ryaw), (qx, qy, th), self.q_erken_xy, self.q_erken_yaw)
+            self._nav_q_kalan_mesafe_m = d
+
+            # 4. Eylem geri bildiriminde NAV_Q sırasında kalan_mesafe_m = robot–Q mesafesi (5 Hz)
+            self._eylem_geri_bildirim_yayinla(
+                durum='NAV_Q',
+                ayrinti=f'kalan {d:.2f} m',
+                kalan_mesafe_m=d,
+                zorla=False,
+            )
+
+            # Geçmişe ekle ve buda
+            self.nav_q_gecmis.append((simdi, d, a))
+            budama_t = simdi - max(self.q_erken_sure * 2.0, 5.0)
+            self.nav_q_gecmis = [k for k in self.nav_q_gecmis if k[0] >= budama_t]
+
+            # 1. Erken kabul: q_erken_xy ve q_erken_yaw içinde q_erken_sure boyunca kalırsa
+            if erken_kabul_durumu(
+                self.nav_q_gecmis,
+                xy=self.q_erken_xy,
+                yaw=self.q_erken_yaw,
+                sure=self.q_erken_sure,
+            ):
+                mesaj = f'NAV_Q erken_kabul ({d * 100:.1f} cm, {math.degrees(a):.1f}°)'
+                self._nav_q_gecis_yap('SON_YAKLASMA', mesaj=mesaj)
+                return
+
+        # 2. Zaman aşımı: nav_q_zaman_asimi içinde bitmezse
+        if gecen_sure >= self.nav_q_zaman_asimi:
+            yakin = False
+            d_k, a_k = 0.0, 0.0
+            if tf_alindi:
+                yakin, d_k, a_k = q_yakin_mi(
+                    (rx, ry, ryaw),
+                    (qx, qy, th),
+                    self.q_kabul_xy,
+                    self.q_kabul_yaw,
+                )
+
+            if yakin:
+                mesaj = f'NAV_Q yakin_kabul ({d_k * 100:.1f} cm, {math.degrees(a_k):.1f}°)'
+                self._nav_q_gecis_yap('SON_YAKLASMA', mesaj=mesaj)
+            else:
+                self.durum(f'NAV_Q zaman aşımı ({self.nav_q_zaman_asimi:.0f} s)')
+                self._nav_q_gecis_yap(
+                    'SONRAKI_ADAY',
+                    neden=f'zaman aşımı ({self.nav_q_zaman_asimi:.0f} s)',
+                )
+            return
 
     def _dongu_son_yaklasma(self) -> None:
         if self.durum_kodu != 'SON_YAKLASMA':

@@ -24,7 +24,11 @@ from dinamik_engel import (
     interpolate_trajectory,
     StopDetector,
     load_scenarios,
-    format_terminal_table
+    format_terminal_table,
+    transform_twist_to_world,
+    compute_approach_velocity,
+    classify_collision,
+    calculate_stop_duration_before_contact
 )
 
 
@@ -363,6 +367,145 @@ def test_format_terminal_table():
     assert "0.342" in table
     assert "HAYIR" in table
     assert "0.702" in table
+    assert "Sınıf" in table
+    assert "Yaklaşma v (m/s)" in table
+
+
+# ==============================================================================
+# 6. F6 Görevi Hız Dönüşümü, Yaklaşma Hızı ve Kusur Ayrımı Testleri
+# ==============================================================================
+
+def test_transform_twist_to_world():
+    # Yaw = 0 -> robot x yönü dünya x yönü ile aynı
+    vx_w, vy_w = transform_twist_to_world(0.5, 0.0, 0.0)
+    assert abs(vx_w - 0.5) < 1e-6
+    assert abs(vy_w - 0.0) < 1e-6
+
+    # Yaw = pi/2 (90 derece) -> ileri hız (vx) dünya +y yönüne döner
+    vx_w90, vy_w90 = transform_twist_to_world(0.5, 0.0, math.pi / 2.0)
+    assert abs(vx_w90 - 0.0) < 1e-5
+    assert abs(vy_w90 - 0.5) < 1e-5
+
+    # Yaw = pi (180 derece) -> ileri hız dünya -x yönüne döner
+    vx_w180, vy_w180 = transform_twist_to_world(0.5, 0.0, math.pi)
+    assert abs(vx_w180 - (-0.5)) < 1e-5
+    assert abs(vy_w180 - 0.0) < 1e-5
+
+
+def test_compute_approach_velocity():
+    # Robot (0, 0), Engel (2, 0) -> robot engele doğru 0.3 m/s ile gidiyor
+    v_yak, v_mag = compute_approach_velocity((0.0, 0.0), (0.3, 0.0), (2.0, 0.0))
+    assert abs(v_yak - 0.3) < 1e-5
+    assert abs(v_mag - 0.3) < 1e-5
+
+    # Robot (0, 0), Engel (2, 0) -> robot engelden uzaklaşıyor (-0.2 m/s)
+    v_yak_away, _ = compute_approach_velocity((0.0, 0.0), (-0.2, 0.0), (2.0, 0.0))
+    assert abs(v_yak_away - (-0.2)) < 1e-5
+
+    # Robot (0, 0), Engel (2, 0) -> robot dik hareket ediyor (0, 0.4 m/s)
+    v_yak_perp, v_mag_perp = compute_approach_velocity((0.0, 0.0), (0.0, 0.4), (2.0, 0.0))
+    assert abs(v_yak_perp - 0.0) < 1e-5
+    assert abs(v_mag_perp - 0.4) < 1e-5
+
+    # Robot duruyor (0, 0) -> yaklaşma hızı 0
+    v_yak_stop, v_mag_stop = compute_approach_velocity((0.0, 0.0), (0.0, 0.0), (2.0, 0.0))
+    assert abs(v_yak_stop) < 1e-6
+    assert abs(v_mag_stop) < 1e-6
+
+
+def test_classify_collision():
+    # Çarpışma yoksa None döner
+    assert classify_collision(0.2, 0.2, has_collision=False) is None
+
+    # robot_carpti: temas anında v_yaklasma > 0.05 m/s
+    assert classify_collision(0.10, 0.20, has_collision=True) == 'robot_carpti'
+    assert classify_collision(0.06, 0.08, has_collision=True) == 'robot_carpti'
+
+    # engel_carpti: robot |v| < 0.03 m/s ve v_yaklasma <= 0.05 m/s
+    assert classify_collision(0.00, 0.01, has_collision=True) == 'engel_carpti'
+    assert classify_collision(-0.01, 0.00, has_collision=True) == 'engel_carpti'
+    assert classify_collision(0.02, 0.025, has_collision=True) == 'engel_carpti'
+
+    # karisik: robot hareket halinde (|v| >= 0.03) ancak v_yaklasma <= 0.05 m/s
+    # Örneğin robot dik dönüyor veya kaçıyor
+    assert classify_collision(0.02, 0.15, has_collision=True) == 'karisik'
+    assert classify_collision(-0.10, 0.20, has_collision=True) == 'karisik'
+    assert classify_collision(0.05, 0.03, has_collision=True) == 'karisik'
+
+
+def test_calculate_stop_duration_before_contact():
+    # Senaryo 1: Robot temas anından (t=10.0s) önce 2.5 saniyedir duruyor (t=7.5'ten itibaren v=0.0)
+    history_stopped_2_5s = [
+        (5.0, 0.3),
+        (7.0, 0.1),
+        (7.4, 0.05),
+        (7.5, 0.01),
+        (8.0, 0.00),
+        (9.0, 0.00),
+        (9.5, 0.01),
+        (10.0, 0.01),
+    ]
+    durma_s, durmus_2s = calculate_stop_duration_before_contact(history_stopped_2_5s, contact_time=10.0)
+    assert durma_s >= 2.5
+    assert durmus_2s is True
+
+    # Senaryo 2: Robot temastan önce yalnızca 0.8 saniyedir duruyor (t=9.2'den itibaren v=0.0)
+    history_stopped_short = [
+        (8.0, 0.3),
+        (9.0, 0.1),
+        (9.2, 0.01),
+        (9.6, 0.00),
+        (10.0, 0.00),
+    ]
+    durma_s_short, durmus_2s_short = calculate_stop_duration_before_contact(history_stopped_short, contact_time=10.0)
+    assert abs(durma_s_short - 0.8) < 1e-2
+    assert durmus_2s_short is False
+
+    # Senaryo 3: Robot temas anında hareket halinde (v=0.2 m/s)
+    history_moving = [
+        (8.0, 0.3),
+        (9.0, 0.25),
+        (10.0, 0.20),
+    ]
+    durma_s_mov, durmus_2s_mov = calculate_stop_duration_before_contact(history_moving, contact_time=10.0)
+    assert abs(durma_s_mov - 0.0) < 1e-2
+    assert durmus_2s_mov is False
+
+
+def test_format_terminal_table_with_classification():
+    sample_results = [
+        {
+            'senaryo': 'karsidan',
+            'status': 'SUCCEEDED',
+            'sure_s': 15.2,
+            'min_aciklik_m': -0.015,
+            'carpisma': True,
+            'carpisma_sinifi': 'engel_carpti',
+            'v_yaklasma_m_s': 0.008,
+            'min_merkez_mesafesi_m': 0.385,
+            'durdurma_sayisi': 1,
+            'kurtarma_sayisi': 3,
+            'varis_hatasi_m': 0.05
+        },
+        {
+            'senaryo': 'yandan_kesen',
+            'status': 'SUCCEEDED',
+            'sure_s': 18.0,
+            'min_aciklik_m': -0.068,
+            'carpisma': True,
+            'carpisma_sinifi': 'robot_carpti',
+            'v_yaklasma_m_s': 0.124,
+            'min_merkez_mesafesi_m': 0.332,
+            'durdurma_sayisi': 9,
+            'kurtarma_sayisi': 15,
+            'varis_hatasi_m': 0.08
+        }
+    ]
+    table = format_terminal_table(sample_results)
+    assert "engel_carpti" in table
+    assert "robot_carpti" in table
+    assert "0.008" in table
+    assert "0.124" in table
 
 
 if __name__ == '__main__':

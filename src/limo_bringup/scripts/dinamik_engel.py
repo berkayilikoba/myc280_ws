@@ -129,6 +129,96 @@ def center_distance(pos1, pos2):
     return math.hypot(pos1[0] - pos2[0], pos1[1] - pos2[1])
 
 
+def transform_twist_to_world(vx_body, vy_body, yaw):
+    """Robot gövde çerçevesindeki (vx, vy) hızını robot yaw açısını kullanarak dünya çerçevesine dönüştürür."""
+    c, s = math.cos(yaw), math.sin(yaw)
+    vx_world = vx_body * c - vy_body * s
+    vy_world = vx_body * s + vy_body * c
+    return vx_world, vy_world
+
+
+def compute_approach_velocity(robot_pos, robot_world_vel, obstacle_pos):
+    """Robotun engele doğru olan yaklaşma hız bileşeni v_yaklasma ve robot hız büyüklüğü.
+
+    robot_pos: (rx, ry)
+    robot_world_vel: (vx_world, vy_world)
+    obstacle_pos: (ox, oy)
+
+    Döndürür: (v_yaklasma, v_mag)
+      - v_yaklasma: robot hızının robot -> engel doğrultusundaki bileşeni (m/s)
+      - v_mag: robot hızının büyüklüğü |v| (m/s)
+    """
+    rx, ry = robot_pos[0], robot_pos[1]
+    vx_w, vy_w = robot_world_vel[0], robot_world_vel[1]
+    ox, oy = obstacle_pos[0], obstacle_pos[1]
+
+    dx = ox - rx
+    dy = oy - ry
+    dist = math.hypot(dx, dy)
+    v_mag = math.hypot(vx_w, vy_w)
+
+    if dist < 1e-6:
+        return 0.0, v_mag
+
+    ux = dx / dist
+    uy = dy / dist
+    v_yaklasma = vx_w * ux + vy_w * uy
+    return v_yaklasma, v_mag
+
+
+def classify_collision(v_yaklasma, v_robot_mag, has_collision=True):
+    """Çarpışma anındaki hızlara göre kusur sınıflandırması (F6).
+
+    Kriterler:
+      - 'robot_carpti': temas anında v_yaklasma > 0.05 m/s
+      - 'engel_carpti': robot |v| < 0.03 m/s ve v_yaklasma <= 0.05 m/s
+      - 'karisik': diğer durumlar
+      - None: temas / çarpışma yoksa
+    """
+    if not has_collision:
+        return None
+    if v_yaklasma > 0.05:
+        return 'robot_carpti'
+    elif v_robot_mag < 0.03 and v_yaklasma <= 0.05:
+        return 'engel_carpti'
+    else:
+        return 'karisik'
+
+
+def calculate_stop_duration_before_contact(vel_history, contact_time, stop_threshold=0.03, window_s=2.0):
+    """İlk temas anından önceki durma süresini hesaplar (F6).
+
+    vel_history: [(t, v_mag), ...] zaman sıralı hız geçmişi
+    contact_time: ilk temas simülasyon zamanı (sn)
+    stop_threshold: robotun durmuş sayılması için hız eşiği (|v| < 0.03 m/s)
+    window_s: incelenen pencere süresi (2.0 saniye)
+
+    Döndürür: (durma_suresi_s, durmus_muydu_2s)
+      - durma_suresi_s: temas anından geriye doğru robotun kesintisiz durduğu süre (sn)
+      - durmus_muydu_2s: temas öncesindeki 2 saniyelik pencerede robot durmuş muydu (durma_suresi_s >= 2.0 veya pencere boyunca durma)
+    """
+    if not vel_history or contact_time is None:
+        return 0.0, False
+
+    valid = [h for h in vel_history if h[0] <= contact_time]
+    if not valid:
+        return 0.0, False
+
+    t_contact = valid[-1][0]
+    durma_suresi = 0.0
+
+    # Temas anından geriye doğru kesintisiz durma süresini tara
+    for i in range(len(valid) - 1, -1, -1):
+        t, v = valid[i]
+        if v < stop_threshold:
+            durma_suresi = t_contact - t
+        else:
+            break
+
+    durmus_muydu_2s = (durma_suresi >= (window_s - 0.1))
+    return round(durma_suresi, 2), durmus_muydu_2s
+
+
 def interpolate_trajectory(waypoints, speed, elapsed_time, delay=0.0):
     """Yol noktaları boyunca sabit hızla doğrusal yörünge enterpolasyonu.
 
@@ -281,13 +371,15 @@ def format_terminal_table(results):
 
     headers = [
         "Senaryo", "Durum", "Süre(s)", "Min Açıklık(m)",
-        "Çarpışma", "Min Merkez(m)", "Durdurma", "Kurtarma", "Varış Hatası(m)"
+        "Çarpışma", "Sınıf", "Yaklaşma v (m/s)", "Min Merkez(m)", "Durdurma", "Kurtarma", "Varış Hatası(m)"
     ]
     rows = []
     for r in results:
         min_acik = f"{r['min_aciklik_m']:.3f}" if r.get('min_aciklik_m') is not None else "-"
         min_mrk = f"{r['min_merkez_mesafesi_m']:.3f}" if r.get('min_merkez_mesafesi_m') is not None else "-"
         carp = "EVET" if r.get('carpisma') else "HAYIR"
+        sinif = str(r.get('carpisma_sinifi') or r.get('sinif') or '-')
+        v_yak = f"{r['v_yaklasma_m_s']:.3f}" if r.get('v_yaklasma_m_s') is not None else "-"
         varis_h = f"{r['varis_hatasi_m']:.3f}" if r.get('varis_hatasi_m') is not None else "-"
         rows.append([
             str(r.get('senaryo', '')),
@@ -295,6 +387,8 @@ def format_terminal_table(results):
             f"{float(r.get('sure_s', 0.0)):.1f}",
             min_acik,
             carp,
+            sinif,
+            v_yak,
             min_mrk,
             str(r.get('durdurma_sayisi', 0)),
             str(r.get('kurtarma_sayisi', 0)),
@@ -349,6 +443,9 @@ class DynamicObstacleRunner:
                 self.model_xml = f.read()
 
         self.pose = None  # (x, y, yaw)
+        self.twist_linear = (0.0, 0.0)  # (vx, vy) odom twist
+        self.twist_angular_z = 0.0
+        self.child_frame_id = 'base_link'
         self.path_len = 0.0
         self._gercek_var = False
         self.last_smoothed_vx = 0.0
@@ -391,6 +488,12 @@ class DynamicObstacleRunner:
         if self.pose is not None:
             self.path_len += math.hypot(cur[0] - self.pose[0], cur[1] - self.pose[1])
         self.pose = cur
+        if hasattr(m, 'twist') and hasattr(m.twist, 'twist'):
+            t = m.twist.twist
+            self.twist_linear = (t.linear.x, t.linear.y)
+            self.twist_angular_z = t.angular.z
+        if hasattr(m, 'child_frame_id') and m.child_frame_id:
+            self.child_frame_id = m.child_frame_id
 
     def _cmd_vel_smoothed(self, m):
         self.last_smoothed_vx = m.linear.x
@@ -494,6 +597,13 @@ class DynamicObstacleRunner:
         has_collision = False
         max_recoveries = 0
 
+        # F6: Kusur ayrımı ve hız metrikleri
+        approach_samples = []
+        vel_history = []
+        first_contact_time = None
+        contact_v_yaklasma = None
+        contact_v_robot = None
+
         # Başlamadan önce kısa stabilizasyon beklemesi
         end_wait = time.monotonic() + 0.5
         while time.monotonic() < end_wait:
@@ -536,8 +646,34 @@ class DynamicObstacleRunner:
                         )
                         if c_fp < min_clearance:
                             min_clearance = c_fp
+
+                        # Hız dönüşümü (odom_gercek twist -> dünya çerçevesi)
+                        vx_body, vy_body = self.twist_linear
+                        if self.child_frame_id in ('odom', 'map', 'world'):
+                            vx_w, vy_w = vx_body, vy_body
+                        else:
+                            vx_w, vy_w = transform_twist_to_world(vx_body, vy_body, ryaw)
+
+                        v_yak, v_mag = compute_approach_velocity((rx, ry), (vx_w, vy_w), (ox, oy))
+                        vel_history.append((now_sim, v_mag))
+
+                        # F6 A: açıklık < 0.05 m olduğu HER anda hız bileşenleri kaydedilsin
+                        if c_fp < 0.05:
+                            approach_samples.append({
+                                'sim_time_s': round(elapsed, 3),
+                                'aciklik_m': round(c_fp, 4),
+                                'v_yaklasma_m_s': round(v_yak, 4),
+                                'v_robot_m_s': round(v_mag, 4),
+                                'v_robot_dunya': [round(vx_w, 4), round(vy_w, 4)]
+                            })
+
+                        # Temas / Çarpışma anı tespiti (açıklık < 0)
                         if c_fp < 0.0:
-                            has_collision = True
+                            if not has_collision:
+                                has_collision = True
+                                first_contact_time = now_sim
+                                contact_v_yaklasma = v_yak
+                                contact_v_robot = v_mag
 
                     # Durdurma sayacı (cmd_vel fallback kontrolü)
                     self.stop_detector.update_from_cmd_vel(
@@ -583,6 +719,21 @@ class DynamicObstacleRunner:
         min_aciklik = None if math.isinf(min_clearance) else round(min_clearance, 3)
         min_merkez = None if math.isinf(min_center_dist) else round(min_center_dist, 3)
 
+        # F6: Çarpışma kusur sınıflandırması ve durma süresi
+        if has_collision and first_contact_time is not None:
+            carpisma_sinifi = classify_collision(contact_v_yaklasma, contact_v_robot, has_collision=True)
+            durma_suresi_s, durmus_muydu_2s = calculate_stop_duration_before_contact(
+                vel_history, first_contact_time, stop_threshold=0.03, window_s=2.0
+            )
+            v_yak_round = round(contact_v_yaklasma, 3)
+            v_rob_round = round(contact_v_robot, 3)
+        else:
+            carpisma_sinifi = None
+            v_yak_round = None
+            v_rob_round = None
+            durma_suresi_s = None
+            durmus_muydu_2s = None
+
         result_dict = {
             'senaryo': scenario_name,
             'status': status,
@@ -594,6 +745,14 @@ class DynamicObstacleRunner:
             'min_clear_m': min_aciklik,
             'carpisma': has_collision,
             'carpisma_var_mi': has_collision,
+            'carpisma_sinifi': carpisma_sinifi,
+            'sinif': carpisma_sinifi,
+            'collision_class': carpisma_sinifi,
+            'v_yaklasma_m_s': v_yak_round,
+            'yaklasma_hizi_m_s': v_yak_round,
+            'robot_hizi_m_s': v_rob_round,
+            'durma_suresi_s': durma_suresi_s,
+            'temas_oncesi_durdu_mu': durmus_muydu_2s,
             'min_merkez_mesafesi_m': min_merkez,
             'en_kucuk_merkez_mesafesi_m': min_merkez,
             'durdurma_sayisi': self.stop_detector.stop_count,
@@ -606,7 +765,8 @@ class DynamicObstacleRunner:
             'yaw_err_deg': yaw_err,
             'yol_uzunlugu_m': round(self.path_len, 2),
             'path_len_m': round(self.path_len, 2),
-            'son_konum': [round(rx, 3), round(ry, 3), round(math.degrees(ryaw), 1)]
+            'son_konum': [round(rx, 3), round(ry, 3), round(math.degrees(ryaw), 1)],
+            'yaklasma_kayitlari': approach_samples
         }
         return result_dict
 
@@ -722,6 +882,9 @@ def main(argv=None):
                 'toplam_senaryo': len(results),
                 'basarili_sayisi': sum(1 for r in results if r['status'] == 'SUCCEEDED'),
                 'carpisma_sayisi': sum(1 for r in results if r['carpisma']),
+                'robot_carpti_sayisi': sum(1 for r in results if r.get('carpisma_sinifi') == 'robot_carpti'),
+                'engel_carpti_sayisi': sum(1 for r in results if r.get('carpisma_sinifi') == 'engel_carpti'),
+                'karisik_sayisi': sum(1 for r in results if r.get('carpisma_sinifi') == 'karisik'),
                 'toplam_sure_s': round(sum(r['sure_s'] for r in results), 1)
             },
             'senaryolar': {r['senaryo']: r for r in results}

@@ -226,8 +226,8 @@ local_costmap:
   local_costmap:
     ros__parameters:
       use_sim_time: false
-      update_frequency: 5.0
-      publish_frequency: 2.0
+      update_frequency: 10.0  # Hızlı dinamik engeller (0.6 - 0.8 m/s) için 5.0 -> 10.0 Hz yapıldı (F6)
+      publish_frequency: 10.0  # MPPI kontrolcüsüne güncel engelleri aktarmak için 2.0 -> 10.0 Hz yapıldı (F6)
       global_frame: odom
       robot_base_frame: base_link
       rolling_window: true
@@ -260,6 +260,9 @@ local_costmap:
           # Robot + kol ~0.45 m: 0.50 m üstü (masa tablası 0.75 m) engel sayılmaz (masa altına yaklaşma)
           max_obstacle_height: 0.50
           marking: true
+          # clearing (raytrace): Dinamik engeller uzaklaştığında hücreler anında temizlenir.
+          # observation_persistence: Eklenmemiştir (varsayılan 0.0). Dinamik engel arkasında
+          # hayalet iz (ghost trail) kalmaması için her taramada temizleme aktiftir.
           clearing: true
           obstacle_max_range: 2.0
           obstacle_min_range: 0.25
@@ -275,6 +278,8 @@ local_costmap:
           topic: /scan
           data_type: "LaserScan"
           marking: True
+          # clearing (raytrace): Hareketli engelin arkasındaki hücrelerin serbest alana
+          # dönüştürülmesi için aktiftir. observation_persistence 0.0 (varsayılan, eklenmedi).
           clearing: True
           max_obstacle_height: 2.0
           # [robot] 4wd: obstacle_range 1.5, raytrace_range 3.5
@@ -400,15 +405,37 @@ collision_monitor:
     source_timeout: 1.0
     base_shift_correction: True
     stop_pub_timeout: 2.0
-    polygons: ["FootprintApproach"]
+    polygons: ["DurBolge", "YavasBolge", "FootprintApproach"]
+    DurBolge:
+      type: "polygon"
+      # LIMO gövde ayak izi + 0.06 m genişletilmiş durma güvenlik bölgesi:
+      # [[0.221, 0.17], [0.221, -0.17], [-0.221, -0.17], [-0.221, 0.17]]
+      # Humble collision_monitor std::vector<double> [x1, y1, x2, y2, ...] bekler
+      points: [0.221, 0.17, 0.221, -0.17, -0.221, -0.17, -0.221, 0.17]
+      action_type: "stop"
+      max_points: 3
+      visualize: True
+      polygon_pub_topic: "DurBolge"
+      enabled: True
+    YavasBolge:
+      type: "circle"
+      radius: 0.55
+      action_type: "slowdown"
+      slowdown_ratio: 0.4
+      max_points: 3
+      visualize: True
+      polygon_pub_topic: "YavasBolge"
+      enabled: True
     FootprintApproach:
       type: "polygon"
       action_type: "approach"
       footprint_topic: "/local_costmap/published_footprint"
       time_before_collision: 1.2
       simulation_time_step: 0.1
+      max_points: 3
       min_points: 6
-      visualize: False
+      visualize: True
+      polygon_pub_topic: "FootprintApproach"
       enabled: True
     observation_sources: ["scan", "depth"]
     scan:
@@ -506,4 +533,35 @@ waypoint_follower:
 #    - observation_sources listesine "depth" eklendi.
 #    - depth kaynağı (type: pointcloud, topic: /camera/depth/points, min_height: 0.05 m,
 #      max_height: 0.50 m, enabled: true) tanımlandı; alçak ve 3B engeller doğrudan güvenlik durdurmasına dahil edildi.
+# ==============================================================================
+
+# ==============================================================================
+# Görev F6 Değişiklikleri ve Gerekçeleri:
+# 1. local_costmap:
+#    - update_frequency: 5.0 -> 10.0 Hz yapıldı.
+#    - publish_frequency: 2.0 -> 10.0 Hz yapıldı.
+#      Gerekçe: Hızla yaklaşan dinamik engellerde (0.6 - 0.8 m/s insan yürümesi) yerel maliyet
+#      haritasının gecikmesiz güncellenmesi ve MPPI kontrolcüsünün anlık engel konumuna göre
+#      zamanında kaçınma yörüngeleri üretebilmesi sağlandı.
+#    - obstacle_layer (Lidar /scan) ve voxel_layer (Kamera /camera/depth/points) raytrace (clearing)
+#      özelliklerinin aktif olduğu (clearing: true) doğrulandı.
+#    - observation_persistence alanı eklenmedi (Nav2 varsayılanı 0.0 korundu).
+#      Gerekçe: Dinamik engeller hareket ettikçe, geçmiş taramaların hafızada kalmayarak
+#      raytracing ışınları ile arkasındaki hücrelerin anında serbest (free space) alana çevrilmesi
+#      ve robotun arkasında hayalet engel izi (ghost trail) oluşmasının önlenmesi.
+# 2. collision_monitor:
+#    - polygons listesi öncelik sırasına göre düzenlendi: ["DurBolge", "YavasBolge", "FootprintApproach"].
+#      Humble collision_monitor'da liste başındaki poligon en yüksek önceliğe sahiptir.
+#    - "DurBolge" eklendi: type: polygon, points: ayak izi + 0.06 m
+#      ([0.221, 0.17, 0.221, -0.17, -0.221, -0.17, -0.221, 0.17]), action_type: stop,
+#      max_points: 3, visualize: true, polygon_pub_topic: "DurBolge", enabled: true.
+#      Gerekçe: Yaklaşan engel robotun tamponuna 6 cm kala acil güvenlik durdurması tetikler.
+#    - "YavasBolge" eklendi: type: circle, radius: 0.55 m, action_type: slowdown,
+#      slowdown_ratio: 0.4 (%40 hız), max_points: 3, visualize: true, polygon_pub_topic: "YavasBolge",
+#      enabled: true.
+#      Gerekçe: 55 cm mesafede engeli algılayıp robot hızını keserek frenleme mesafesini kısaltır,
+#      MPPI kaçınma veya durma manevrasına zaman kazandırır.
+#    - "FootprintApproach" korundu: action_type: approach, time_before_collision: 1.2 s,
+#      simulation_time_step: 0.1 s, max_points: 3, visualize: true, polygon_pub_topic: "FootprintApproach",
+#      enabled: true.
 # ==============================================================================

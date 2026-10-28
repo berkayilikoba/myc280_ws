@@ -18,9 +18,12 @@ Arayüzler:
       (kol_sahte=True iken servis yoksa 3 sn bekleyip başarılı sayar)
   - Gezinme:
       navigate_to_pose (NavigateToPose eylemi)
+  - Pil farkındalığı:
+      /limo_status (limo_msgs/msg/LimoStatus, battery_voltage)
+      /gorev/sahte_pil (std_msgs/msg/Float32, sahte_pil=True iken simülasyon test girişi)
   - Görev girişi ve durumu:
       /gorev/istek (String, dinleme: ör. 'elma' veya 'iptal')
-      /gorev/durum (String, yayınlama)
+      /gorev/durum (String, yayınlama; durum geçişleri ve 1 Hz pil özeti)
 """
 
 import math
@@ -36,13 +39,14 @@ from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from std_msgs.msg import Empty, String
+from std_msgs.msg import Empty, Float32, String
 from std_srvs.srv import Trigger
 
 from limo_autonomy.gorev_yoneticisi import (
     Ayar,
     Eylem,
     GorevYoneticisi,
+    PilAyari,
     Poz2D,
     load_nesneler,
 )
@@ -54,6 +58,14 @@ try:
 except ImportError:
     Kavra = None
     LIMO_INTERFACES_VAR = False
+
+try:
+    from limo_msgs.msg import LimoStatus
+
+    LIMO_MSGS_VAR = True
+except ImportError:
+    LimoStatus = None
+    LIMO_MSGS_VAR = False
 
 
 def yaw_deg_to_quaternion(yaw_deg: float) -> Quaternion:
@@ -126,17 +138,24 @@ class GorevDugumu(Node):
         self.declare_parameter('kol_zaman_asimi', 30.0)
         self.declare_parameter('kavrama_zaman_asimi', 240.0)
         self.declare_parameter('tasima_zaman_asimi', 180.0)
+        self.declare_parameter('sarj_zaman_asimi', 180.0)
         self.declare_parameter('timer_periyot', 0.5)
         self.declare_parameter('kavrama_arayuzu', 'auto')  # auto | eylem | konu
         self.declare_parameter('kavrama_eylem_bekleme_s', 5.0)
         self.declare_parameter('kavrama_yon_derece', float('nan'))
         self.declare_parameter('kavrama_algisiz_izinli', True)
+        self.declare_parameter('sahte_pil', False)
 
         self._cb_group = ReentrantCallbackGroup()
         self._kilit = threading.RLock()
         self._aktif_nav_gh: Optional[Any] = None
         self._aktif_kavra_gh: Optional[Any] = None
         self._aktif_kavrama_modu: str = 'konu'
+
+        # Pil durumu takibi
+        self._pil_ozelligi_aktif = True
+        self._son_pil_gerilim: Optional[float] = None
+        self._son_pil_ozet_zamani: float = 0.0
 
         # Durum makinesini hazırla
         dosya_yolu = str(self.get_parameter('nesneler_dosyasi').value)
@@ -160,11 +179,14 @@ class GorevDugumu(Node):
             ayar.kavrama_zaman_asimi = float(self.get_parameter('kavrama_zaman_asimi').value)
             ayar.tasima_zaman_asimi = float(self.get_parameter('tasima_zaman_asimi').value)
             ayar.kol_zaman_asimi = float(self.get_parameter('kol_zaman_asimi').value)
+            ayar.sarj_zaman_asimi = float(self.get_parameter('sarj_zaman_asimi').value)
             self.yonetici = GorevYoneticisi(
                 nesneler=cfg['nesneler'],
                 ev=cfg['ev'],
                 birakma=cfg.get('birakma'),
+                sarj=cfg.get('sarj'),
                 ayar=ayar,
+                pil_ayar=cfg.get('pil_ayar', cfg.get('pil')),
             )
         else:
             self.get_logger().warn(f"Yapılandırma dosyası bulunamadı ({dosya_yolu}), varsayılan ile başlandı.")
@@ -172,10 +194,12 @@ class GorevDugumu(Node):
                 nesneler={},
                 ev=Poz2D(0.0, 0.0, 0.0),
                 birakma=Poz2D(0.0, 0.0, 0.0),
+                sarj=Poz2D(0.0, 0.0, 0.0),
                 ayar=Ayar(
                     kavrama_zaman_asimi=float(self.get_parameter('kavrama_zaman_asimi').value),
                     tasima_zaman_asimi=float(self.get_parameter('tasima_zaman_asimi').value),
                     kol_zaman_asimi=float(self.get_parameter('kol_zaman_asimi').value),
+                    sarj_zaman_asimi=float(self.get_parameter('sarj_zaman_asimi').value),
                 ),
             )
 
@@ -184,7 +208,7 @@ class GorevDugumu(Node):
         self.pub_kavrama_iptal = self.create_publisher(Empty, '/kavrama/iptal', 10)
         self.pub_gorev_durum = self.create_publisher(String, '/gorev/durum', 10)
 
-        # Abonelikler
+        # Abonelikler (Görev ve Kavrama)
         self.sub_gorev_istek = self.create_subscription(
             String,
             '/gorev/istek',
@@ -199,6 +223,36 @@ class GorevDugumu(Node):
             10,
             callback_group=self._cb_group,
         )
+
+        # Pil Abonelikleri (/limo_status veya /gorev/sahte_pil)
+        self.sub_limo_status = None
+        self.sub_sahte_pil = None
+        sahte_pil_aktif = bool(self.get_parameter('sahte_pil').value)
+
+        if sahte_pil_aktif:
+            self.get_logger().info("Sahte pil modu devrede: /gorev/sahte_pil (Float32) dinleniyor.")
+            self.sub_sahte_pil = self.create_subscription(
+                Float32,
+                '/gorev/sahte_pil',
+                self._sahte_pil_cb,
+                10,
+                callback_group=self._cb_group,
+            )
+        else:
+            if LIMO_MSGS_VAR and LimoStatus is not None:
+                self.get_logger().info("Pil izleme devrede: /limo_status (LimoStatus) dinleniyor.")
+                self.sub_limo_status = self.create_subscription(
+                    LimoStatus,
+                    '/limo_status',
+                    self._limo_status_cb,
+                    10,
+                    callback_group=self._cb_group,
+                )
+            else:
+                self.get_logger().warn(
+                    "limo_msgs paketi bulunamadı (/limo_status dinlenemiyor); pil farkındalığı özelliği kapatıldı."
+                )
+                self._pil_ozelligi_aktif = False
 
         # Servis İstemcileri (Kol)
         self.cli_kol_kavra = self.create_client(
@@ -234,7 +288,7 @@ class GorevDugumu(Node):
             callback_group=self._cb_group,
         )
 
-        # Periyodik denetim zamanlayıcısı (zaman aşımı kontrolleri için)
+        # Periyodik denetim ve 1 Hz özet zamanlayıcısı
         timer_periyot = float(self.get_parameter('timer_periyot').value)
         self.timer = self.create_timer(
             timer_periyot,
@@ -267,12 +321,42 @@ class GorevDugumu(Node):
             eylemler = self.yonetici.olay('kavrama_durum', durum_str, t)
         self._eylemleri_uygula(eylemler)
 
+    def _limo_status_cb(self, msg: Any) -> None:
+        """/limo_status konusundan gelen batarya gerilimini durum makinesine iletir."""
+        if not self._pil_ozelligi_aktif:
+            return
+        try:
+            gerilim = float(getattr(msg, 'battery_voltage', 0.0))
+        except (TypeError, ValueError):
+            return
+        self._pil_olayi_isle(gerilim)
+
+    def _sahte_pil_cb(self, msg: Float32) -> None:
+        """/gorev/sahte_pil konusundan gelen test gerilimini durum makinesine iletir."""
+        self._pil_olayi_isle(float(msg.data))
+
+    def _pil_olayi_isle(self, gerilim: float) -> None:
+        """Batarya gerilimini durum makinesine iletir."""
+        self._son_pil_gerilim = gerilim
+        t = self._simdi()
+        with self._kilit:
+            eylemler = self.yonetici.olay('pil', gerilim, t)
+        self._eylemleri_uygula(eylemler)
+
     def _zaman_dongusu(self) -> None:
-        """Aşama zaman aşımlarını tetiklemek üzere düzenli zaman olayını gönderir."""
+        """Aşama zaman aşımlarını tetikler ve 1 Hz durum/pil özeti yayınlar."""
         t = self._simdi()
         with self._kilit:
             eylemler = self.yonetici.olay('zaman', None, t)
         self._eylemleri_uygula(eylemler)
+
+        # 1 Hz durum ve pil gerilimi özeti yayını
+        if (t - self._son_pil_ozet_zamani) >= 1.0:
+            self._son_pil_ozet_zamani = t
+            durum_str = f"DURUM {self.yonetici.durum}"
+            if self._son_pil_gerilim is not None:
+                durum_str += f" pil={self._son_pil_gerilim:.2f}V"
+            self.pub_gorev_durum.publish(String(data=durum_str))
 
     def _eylemleri_uygula(self, eylemler: List[Eylem]) -> None:
         """Durum makinesinin ürettiği eylemleri ROS katmanında yürütür."""
@@ -343,7 +427,7 @@ class GorevDugumu(Node):
             self._eylemleri_uygula(eylemler)
             return
 
-        # 'konu' modu veya 'auto' modunda 5 sn içinde eylem sunucusu bulunamadığında konu arayüzüne düşüş
+        # 'konu' modu veya eylem sunucusu yokken konu arayüzüne düşüş
         if mod_param != 'konu':
             self.get_logger().warn(
                 f"kavra eylem sunucusu {bekleme_s:.1f} sn içinde bulunamadı; "

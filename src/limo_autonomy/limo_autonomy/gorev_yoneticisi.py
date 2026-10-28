@@ -7,13 +7,23 @@ Durum Akışı:
   BOSTA -> KAVRAMAYA_GIT (kavrama hedefi gönder) -> [HAZIR] KOL_KAVRA -> [başarılı]
   TASI (birakma pozuna NavigateToPose) -> [başarılı] KOL_BIRAK -> [başarılı]
   EVE_DON -> BOSTA (sonuç 'TAMAM').
+  SARJA_GIT -> SARJDA -> BOSTA (şarj tamamlandığında).
 
 Hata ve Yeniden Deneme Politikası:
   - Kavrama HATA: 1 kez yeniden dene (yeniden hedef gönder), sonra 'BASARISIZ kavrama'.
   - Kol kavra başarısız: kavramayı 1 kez yeniden dene, sonra 'BASARISIZ kavrama'.
   - Taşıma başarısız: 2 kez yeniden dene (toplam 3 deneme), sonra 'BASARISIZ tasima'
     ve olduğun yerde KOL_BIRAK yapmadan eve dönmeyi dene.
+  - Şarj başarısız: 2 kez yeniden dene (toplam 3 deneme), sonra 'BASARISIZ sarj'
+    ve BOSTA durumunda kal (yeni istek reddi sürer).
   - İptal her durumda: aktif eylemi iptal et ve BOSTA durumuna geç.
+  - Pil yönetimi:
+    * BOSTA'da gerilim < uyari_v -> istekleri REDDET ('HATA pil düşük'), SARJA_GIT başlat.
+    * Görev sürerken uyari_v altı: mevcut görevi BİTİR, bitince SARJA_GIT.
+    * kritik_v altı: KAVRAMAYA_GIT / KOL_KAVRA öncesindeyse görevi iptal et (kavrama_iptal) ve SARJA_GIT;
+      nesne TUTULUYORSA nesneyi BIRAKMADAN doğrudan SARJA_GIT ('SARJA_GIT nesne tutuluyor').
+    * SARJDA durumunda: gerilim > uyari_v + 0.4 V olunca BOSTA'ya dön ve istekleri yeniden kabul et.
+    * Gerilim eşiklerinin tetiklenmesi için gerilimin tampon_s boyunca eşik altında kalması gerekir.
   - Her durum geçişi `gecmis` listesine (zaman, eski, yeni, neden) eklenir.
 """
 
@@ -67,8 +77,23 @@ class Ayar:
     tasima_zaman_asimi: float = 180.0
     kol_zaman_asimi: float = 30.0
     eve_don_zaman_asimi: float = 180.0
+    sarj_zaman_asimi: float = 180.0
     max_kavrama_yeniden_dene: int = 1
     max_tasima_yeniden_dene: int = 2
+    max_sarj_yeniden_dene: int = 2
+
+
+@dataclass
+class PilAyari:
+    """Pil koruma eşikleri ve tampon süresi."""
+
+    uyari_v: float = 11.0
+    kritik_v: float = 10.5
+    tampon_s: float = 10.0
+
+
+# Uyumluluk takma adı
+PilAyar = PilAyari
 
 
 @dataclass(frozen=True)
@@ -80,7 +105,7 @@ class Eylem:
 
 
 class GorevYoneticisi:
-    """Nesne alma ve getirme görevlerini yöneten durum makinesi."""
+    """Nesne alma, getirme ve şarj görevlerini yöneten durum makinesi."""
 
     GECERLI_EYLEM_TURLERI = {
         'kavrama_hedef',
@@ -97,7 +122,10 @@ class GorevYoneticisi:
         nesneler: Dict[str, Any],
         ev: Any,
         birakma: Optional[Any] = None,
+        sarj: Optional[Any] = None,
         ayar: Optional[Any] = None,
+        pil_ayar: Optional[Any] = None,
+        pil: Optional[Any] = None,
     ) -> None:
         """Görev yöneticisini başlatır."""
         self.nesneler: Dict[str, NesneKonumu] = {}
@@ -113,6 +141,7 @@ class GorevYoneticisi:
 
         self.ev: Poz2D = self._normalize_poz(ev)
         self.birakma: Poz2D = self._normalize_poz(birakma) if birakma is not None else self.ev
+        self.sarj: Poz2D = self._normalize_poz(sarj) if sarj is not None else self.ev
 
         if ayar is None:
             self.ayar = Ayar()
@@ -123,13 +152,39 @@ class GorevYoneticisi:
         else:
             raise ValueError(f"Geçersiz ayar tipi: {type(ayar)}")
 
+        secilen_pil = pil_ayar if pil_ayar is not None else pil
+        if secilen_pil is None:
+            self.pil_ayar = PilAyari()
+        elif isinstance(secilen_pil, dict):
+            self.pil_ayar = PilAyari(**secilen_pil)
+        elif isinstance(secilen_pil, PilAyari):
+            self.pil_ayar = secilen_pil
+        else:
+            raise ValueError(f"Geçersiz pil ayarı tipi: {type(secilen_pil)}")
+
         self.durum: str = 'BOSTA'
         self.gecmis: List[Tuple[float, str, str, str]] = []
         self.aktif_nesne: Optional[str] = None
         self.asama_baslangic: float = 0.0
         self.kavrama_deneme: int = 0
         self.tasima_deneme: int = 0
+        self.sarj_deneme: int = 0
         self._tasima_hatasi: bool = False
+
+        # Pil durumu değişkenleri
+        self.son_gerilim: Optional[float] = None
+        self._uyari_baslangic: Optional[float] = None
+        self._kritik_baslangic: Optional[float] = None
+        self._pil_uyari: bool = False
+        self._pil_kritik: bool = False
+        self._gorev_bitince_sarja_git: bool = False
+        self._sarj_basarisiz: bool = False
+        self._nesne_tutuluyor: bool = False
+
+    @property
+    def pil_gerilim(self) -> Optional[float]:
+        """En son okunan pil gerilimi."""
+        return self.son_gerilim
 
     @staticmethod
     def _normalize_poz(p: Any) -> Poz2D:
@@ -158,10 +213,21 @@ class GorevYoneticisi:
         self.asama_baslangic = float(t)
         self.gecmis.append((float(t), eski, yeni, str(neden)))
 
+    def _istek_reddedilmeli_mi(self) -> bool:
+        """Düşük pil veya şarj sürecinde yeni istek reddi kontrolü."""
+        if self._pil_uyari or self._pil_kritik or self._sarj_basarisiz:
+            return True
+        if self.durum in ('SARJA_GIT', 'SARJDA'):
+            return True
+        return False
+
     def istek(self, ad: str, t: float = 0.0) -> List[Eylem]:
         """Kullanıcıdan gelen nesne alma isteğini veya iptal komutunu işler."""
         if ad == 'iptal':
             return self.olay('iptal', None, t)
+
+        if self._istek_reddedilmeli_mi():
+            return [Eylem(tur='durum', veri='HATA pil düşük')]
 
         if self.durum != 'BOSTA':
             return [Eylem(tur='durum', veri='HATA mesgul')]
@@ -173,6 +239,7 @@ class GorevYoneticisi:
         self.kavrama_deneme = 0
         self.tasima_deneme = 0
         self._tasima_hatasi = False
+        self._nesne_tutuluyor = False
         self._gecis('KAVRAMAYA_GIT', t, neden=f'istek: {ad}')
 
         return [
@@ -181,9 +248,12 @@ class GorevYoneticisi:
         ]
 
     def olay(self, tur: str, veri: Any = None, t: float = 0.0) -> List[Eylem]:
-        """Sistemden gelen olayları işler (kavrama_durum, kol_sonuc, nav_sonuc, iptal, zaman)."""
+        """Sistemden gelen olayları işler (kavrama_durum, kol_sonuc, nav_sonuc, iptal, zaman, pil)."""
         if tur == 'iptal':
             return self._iptal_et(t)
+
+        if tur == 'pil':
+            return self._olay_pil(veri, t)
 
         if tur == 'kavrama_durum':
             return self._olay_kavrama_durum(veri, t)
@@ -207,13 +277,178 @@ class GorevYoneticisi:
         eylemler: List[Eylem] = []
         if self.durum == 'KAVRAMAYA_GIT':
             eylemler.append(Eylem(tur='kavrama_iptal', veri=None))
-        elif self.durum in ('TASI', 'EVE_DON'):
+        elif self.durum in ('TASI', 'EVE_DON', 'SARJA_GIT'):
             eylemler.append(Eylem(tur='nav_iptal', veri=None))
 
-        self._gecis('BOSTA', t, neden='iptal')
         self.aktif_nesne = None
+
+        if self._pil_uyari or self._pil_kritik:
+            self.sarj_deneme = 0
+            self._gecis('SARJA_GIT', t, neden='iptal sonrasi pil dusuk, sarja gidiliyor')
+            eylemler.append(Eylem(tur='durum', veri='IPTAL'))
+            durum_metni = 'SARJA_GIT nesne tutuluyor' if self._nesne_tutuluyor else 'SARJA_GIT'
+            eylemler.append(Eylem(tur='durum', veri=durum_metni))
+            eylemler.append(Eylem(tur='nav_git', veri=self.sarj))
+            return eylemler
+
+        self._gecis('BOSTA', t, neden='iptal')
         eylemler.append(Eylem(tur='durum', veri='IPTAL'))
         return eylemler
+
+    def _olay_pil(self, veri: Any, t: float) -> List[Eylem]:
+        """Pil gerilimi olayını işler, eşik ve tampon kontrollerini yürütür."""
+        gerilim = None
+        if isinstance(veri, (int, float)):
+            gerilim = float(veri)
+        elif isinstance(veri, (list, tuple)):
+            if len(veri) > 0 and isinstance(veri[0], (int, float)):
+                gerilim = float(veri[0])
+            if len(veri) > 1 and isinstance(veri[1], (int, float)) and t == 0.0:
+                t = float(veri[1])
+        elif isinstance(veri, dict):
+            for k in ('gerilim', 'battery_voltage', 'voltage', 'v'):
+                if k in veri and isinstance(veri[k], (int, float)):
+                    gerilim = float(veri[k])
+                    break
+            if 't' in veri and isinstance(veri['t'], (int, float)) and t == 0.0:
+                t = float(veri['t'])
+
+        if gerilim is None:
+            return []
+
+        self.son_gerilim = gerilim
+
+        # SARJDA durumu: gerilim uyari_v + 0.4 V'u geçince BOSTA'ya dön ve istekleri yeniden kabul et
+        if self.durum == 'SARJDA':
+            if gerilim > (self.pil_ayar.uyari_v + 0.4):
+                self._pil_uyari = False
+                self._pil_kritik = False
+                self._gorev_bitince_sarja_git = False
+                self._sarj_basarisiz = False
+                self._uyari_baslangic = None
+                self._kritik_baslangic = None
+                self._nesne_tutuluyor = False
+                self._gecis('BOSTA', t, neden='sarj tamamlandi')
+                return [Eylem(tur='durum', veri='BOSTA')]
+            return []
+
+        # Başarısız şarj sonrası gerilim yükselmişse durumu temizle
+        if self.durum == 'BOSTA' and self._sarj_basarisiz:
+            if gerilim > (self.pil_ayar.uyari_v + 0.4):
+                self._pil_uyari = False
+                self._pil_kritik = False
+                self._gorev_bitince_sarja_git = False
+                self._sarj_basarisiz = False
+                self._uyari_baslangic = None
+                self._kritik_baslangic = None
+                self._nesne_tutuluyor = False
+                return [Eylem(tur='durum', veri='BOSTA')]
+
+        # Eşik ve tampon süresi takibi
+        if gerilim < self.pil_ayar.kritik_v:
+            if self._kritik_baslangic is None:
+                self._kritik_baslangic = t
+        else:
+            self._kritik_baslangic = None
+
+        if gerilim < self.pil_ayar.uyari_v:
+            if self._uyari_baslangic is None:
+                self._uyari_baslangic = t
+        else:
+            self._uyari_baslangic = None
+
+        tampon = self.pil_ayar.tampon_s
+
+        kritik_tetiklendi = (
+            self._kritik_baslangic is not None
+            and (t - self._kritik_baslangic) >= tampon
+        )
+        uyari_tetiklendi = (
+            self._uyari_baslangic is not None
+            and (t - self._uyari_baslangic) >= tampon
+        )
+
+        if kritik_tetiklendi:
+            if not self._pil_kritik:
+                self._pil_kritik = True
+                self._pil_uyari = True
+                return self._tetikle_kritik_pil(t)
+            return []
+
+        if uyari_tetiklendi:
+            if not self._pil_uyari:
+                self._pil_uyari = True
+                return self._tetikle_uyari_pil(t)
+            return []
+
+        return []
+
+    def _tetikle_kritik_pil(self, t: float) -> List[Eylem]:
+        """Kritik gerilim eşiği tetiklendiğinde uygulanacak geçişler."""
+        eski_durum = self.durum
+
+        if eski_durum in ('SARJA_GIT', 'SARJDA'):
+            return []
+
+        if eski_durum == 'BOSTA':
+            self.sarj_deneme = 0
+            self._gecis('SARJA_GIT', t, neden='kritik pil, sarja gidiliyor')
+            return [
+                Eylem(tur='durum', veri='SARJA_GIT'),
+                Eylem(tur='nav_git', veri=self.sarj),
+            ]
+
+        # KAVRAMAYA_GIT ya da KOL_KAVRA öncesindeyse görevi iptal et (kavrama_iptal) ve SARJA_GIT
+        if eski_durum in ('KAVRAMAYA_GIT', 'KOL_KAVRA'):
+            self.aktif_nesne = None
+            self.sarj_deneme = 0
+            self._gecis('SARJA_GIT', t, neden='kritik pil, kavrama iptal')
+            return [
+                Eylem(tur='kavrama_iptal', veri=None),
+                Eylem(tur='durum', veri='SARJA_GIT'),
+                Eylem(tur='nav_git', veri=self.sarj),
+            ]
+
+        # Nesne TUTULUYORSA (KOL_KAVRA başarılı, TASI/KOL_BIRAK) nesneyi BIRAKMADAN doğrudan SARJA_GIT
+        if eski_durum in ('TASI', 'KOL_BIRAK'):
+            self._nesne_tutuluyor = True
+            self.sarj_deneme = 0
+            self._gecis('SARJA_GIT', t, neden='kritik pil, nesne tutuluyor')
+            eylemler = []
+            if eski_durum == 'TASI':
+                eylemler.append(Eylem(tur='nav_iptal', veri=None))
+            eylemler.append(Eylem(tur='durum', veri='SARJA_GIT nesne tutuluyor'))
+            eylemler.append(Eylem(tur='nav_git', veri=self.sarj))
+            return eylemler
+
+        # EVE_DON durumundaysa
+        if eski_durum == 'EVE_DON':
+            self.sarj_deneme = 0
+            self._gecis('SARJA_GIT', t, neden='kritik pil, eve donus kesildi sarja gidiliyor')
+            eylemler = [Eylem(tur='nav_iptal', veri=None)]
+            durum_metni = 'SARJA_GIT nesne tutuluyor' if (self._nesne_tutuluyor or self._tasima_hatasi) else 'SARJA_GIT'
+            eylemler.append(Eylem(tur='durum', veri=durum_metni))
+            eylemler.append(Eylem(tur='nav_git', veri=self.sarj))
+            return eylemler
+
+        return []
+
+    def _tetikle_uyari_pil(self, t: float) -> List[Eylem]:
+        """Uyarı gerilim eşiği tetiklendiğinde uygulanacak geçişler."""
+        if self.durum == 'BOSTA':
+            self.sarj_deneme = 0
+            self._gecis('SARJA_GIT', t, neden='pil dusuk, sarja gidiliyor')
+            return [
+                Eylem(tur='durum', veri='SARJA_GIT'),
+                Eylem(tur='nav_git', veri=self.sarj),
+            ]
+
+        if self.durum in ('KAVRAMAYA_GIT', 'KOL_KAVRA', 'TASI', 'KOL_BIRAK', 'EVE_DON'):
+            # Görev sürerken uyari_v altı: mevcut görevi BİTİR, bitince SARJA_GIT
+            self._gorev_bitince_sarja_git = True
+            return []
+
+        return []
 
     def _olay_kavrama_durum(self, veri: Any, t: float) -> List[Eylem]:
         """Kavrama düğümünden gelen durum mesajlarını değerlendirir."""
@@ -238,13 +473,22 @@ class GorevYoneticisi:
                     Eylem(tur='kavrama_hedef', veri=nesne),
                 ]
             else:
-                self._gecis('BOSTA', t, neden='kavrama basarisiz')
                 self.aktif_nesne = None
-                return [
-                    Eylem(tur='durum', veri='BASARISIZ kavrama'),
-                ]
+                if self._gorev_bitince_sarja_git or self._pil_uyari:
+                    self.sarj_deneme = 0
+                    self._gecis('SARJA_GIT', t, neden='kavrama basarisiz, sarja gidiliyor')
+                    return [
+                        Eylem(tur='durum', veri='BASARISIZ kavrama'),
+                        Eylem(tur='durum', veri='SARJA_GIT'),
+                        Eylem(tur='nav_git', veri=self.sarj),
+                    ]
+                else:
+                    self._gecis('BOSTA', t, neden='kavrama basarisiz')
+                    return [
+                        Eylem(tur='durum', veri='BASARISIZ kavrama'),
+                    ]
 
-        # Ara durumlar (PLAN, NAV, HIZALA, YAKLAS vb.) durum geçişine yol açmaz
+        # Ara durumlar durum geçişine yol açmaz
         return []
 
     def _olay_kol_sonuc(self, veri: Any, t: float) -> List[Eylem]:
@@ -253,13 +497,13 @@ class GorevYoneticisi:
 
         if self.durum == 'KOL_KAVRA':
             if basarili:
+                self._nesne_tutuluyor = True
                 self._gecis('TASI', t, neden='kol kavrama basarili')
                 return [
                     Eylem(tur='durum', veri='TASI'),
                     Eylem(tur='nav_git', veri=self.birakma),
                 ]
             else:
-                # kol kavra başarısız -> geri çekil yok, kavramayı 1 kez yeniden dene
                 if self.kavrama_deneme < self.ayar.max_kavrama_yeniden_dene:
                     self.kavrama_deneme += 1
                     self._gecis(
@@ -273,13 +517,23 @@ class GorevYoneticisi:
                         Eylem(tur='kavrama_hedef', veri=nesne),
                     ]
                 else:
-                    self._gecis('BOSTA', t, neden='kol kavrama basarisiz, denemeler tukendi')
                     self.aktif_nesne = None
-                    return [
-                        Eylem(tur='durum', veri='BASARISIZ kavrama'),
-                    ]
+                    if self._gorev_bitince_sarja_git or self._pil_uyari:
+                        self.sarj_deneme = 0
+                        self._gecis('SARJA_GIT', t, neden='kol kavrama basarisiz, sarja gidiliyor')
+                        return [
+                            Eylem(tur='durum', veri='BASARISIZ kavrama'),
+                            Eylem(tur='durum', veri='SARJA_GIT'),
+                            Eylem(tur='nav_git', veri=self.sarj),
+                        ]
+                    else:
+                        self._gecis('BOSTA', t, neden='kol kavrama basarisiz, denemeler tukendi')
+                        return [
+                            Eylem(tur='durum', veri='BASARISIZ kavrama'),
+                        ]
 
         if self.durum == 'KOL_BIRAK':
+            self._nesne_tutuluyor = False
             self._gecis('EVE_DON', t, neden='kol birakma tamamlandi')
             return [
                 Eylem(tur='durum', veri='EVE_DON'),
@@ -300,7 +554,6 @@ class GorevYoneticisi:
                     Eylem(tur='kol_birak', veri=None),
                 ]
             else:
-                # TASI başarısız -> 2 kez yeniden dene, sonra 'BASARISIZ tasima' ve KOL_BIRAK YAPMA, eve dönmeyi dene
                 if self.tasima_deneme < self.ayar.max_tasima_yeniden_dene:
                     self.tasima_deneme += 1
                     self._gecis('TASI', t, neden=f'tasima basarisiz yeniden deneme ({self.tasima_deneme})')
@@ -318,21 +571,64 @@ class GorevYoneticisi:
                     ]
 
         if self.durum == 'EVE_DON':
-            self._gecis('BOSTA', t, neden='eve donus tamamlandi')
             self.aktif_nesne = None
-            if self._tasima_hatasi:
+            if self._gorev_bitince_sarja_git or self._pil_uyari or self._pil_kritik:
+                self.sarj_deneme = 0
+                self._gecis('SARJA_GIT', t, neden='gorev tamamlandi, sarja gidiliyor')
+                eylemler: List[Eylem] = []
+                if not self._tasima_hatasi:
+                    eylemler.append(Eylem(tur='durum', veri='TAMAM'))
+                durum_metni = 'SARJA_GIT nesne tutuluyor' if (self._nesne_tutuluyor or self._tasima_hatasi) else 'SARJA_GIT'
+                eylemler.append(Eylem(tur='durum', veri=durum_metni))
+                eylemler.append(Eylem(tur='nav_git', veri=self.sarj))
+                return eylemler
+            else:
+                self._gecis('BOSTA', t, neden='eve donus tamamlandi')
+                if self._tasima_hatasi:
+                    return [
+                        Eylem(tur='durum', veri='BOSTA'),
+                    ]
+                else:
+                    return [
+                        Eylem(tur='durum', veri='TAMAM'),
+                    ]
+
+        if self.durum == 'SARJA_GIT':
+            if basarili:
+                self._gecis('SARJDA', t, neden='sarj noktasina ulasildi')
                 return [
-                    Eylem(tur='durum', veri='BOSTA'),
+                    Eylem(tur='durum', veri='SARJDA'),
                 ]
             else:
-                return [
-                    Eylem(tur='durum', veri='TAMAM'),
-                ]
+                if self.sarj_deneme < self.ayar.max_sarj_yeniden_dene:
+                    self.sarj_deneme += 1
+                    self._gecis(
+                        'SARJA_GIT',
+                        t,
+                        neden=f'sarja git basarisiz yeniden deneme ({self.sarj_deneme})',
+                    )
+                    durum_metni = 'SARJA_GIT nesne tutuluyor' if self._nesne_tutuluyor else 'SARJA_GIT'
+                    return [
+                        Eylem(tur='durum', veri=durum_metni),
+                        Eylem(tur='nav_git', veri=self.sarj),
+                    ]
+                else:
+                    self._sarj_basarisiz = True
+                    self._gecis('BOSTA', t, neden='sarja git basarisiz, denemeler tukendi')
+                    return [
+                        Eylem(tur='durum', veri='BASARISIZ sarj'),
+                    ]
 
         return []
 
     def _olay_zaman(self, t: float) -> List[Eylem]:
         """Aşama zaman aşımlarını denetler."""
+        # Zaman akışında pil tamponu takibi
+        if self.son_gerilim is not None and (self._uyari_baslangic is not None or self._kritik_baslangic is not None):
+            pil_eylemleri = self._olay_pil(self.son_gerilim, t)
+            if pil_eylemleri:
+                return pil_eylemleri
+
         gecen = max(0.0, float(t) - self.asama_baslangic)
 
         if self.durum == 'KAVRAMAYA_GIT':
@@ -347,12 +643,22 @@ class GorevYoneticisi:
                         Eylem(tur='kavrama_hedef', veri=nesne),
                     ]
                 else:
-                    self._gecis('BOSTA', t, neden='kavrama zaman asimi')
                     self.aktif_nesne = None
-                    return [
-                        Eylem(tur='kavrama_iptal', veri=None),
-                        Eylem(tur='durum', veri='BASARISIZ kavrama'),
-                    ]
+                    if self._gorev_bitince_sarja_git or self._pil_uyari:
+                        self.sarj_deneme = 0
+                        self._gecis('SARJA_GIT', t, neden='kavrama zaman asimi, sarja gidiliyor')
+                        return [
+                            Eylem(tur='kavrama_iptal', veri=None),
+                            Eylem(tur='durum', veri='BASARISIZ kavrama'),
+                            Eylem(tur='durum', veri='SARJA_GIT'),
+                            Eylem(tur='nav_git', veri=self.sarj),
+                        ]
+                    else:
+                        self._gecis('BOSTA', t, neden='kavrama zaman asimi')
+                        return [
+                            Eylem(tur='kavrama_iptal', veri=None),
+                            Eylem(tur='durum', veri='BASARISIZ kavrama'),
+                        ]
 
         elif self.durum == 'TASI':
             if gecen >= self.ayar.tasima_zaman_asimi:
@@ -389,14 +695,24 @@ class GorevYoneticisi:
                         Eylem(tur='kavrama_hedef', veri=nesne),
                     ]
                 else:
-                    self._gecis('BOSTA', t, neden='kol kavrama zaman asimi')
                     self.aktif_nesne = None
-                    return [
-                        Eylem(tur='durum', veri='BASARISIZ kavrama'),
-                    ]
+                    if self._gorev_bitince_sarja_git or self._pil_uyari:
+                        self.sarj_deneme = 0
+                        self._gecis('SARJA_GIT', t, neden='kol kavrama zaman asimi, sarja gidiliyor')
+                        return [
+                            Eylem(tur='durum', veri='BASARISIZ kavrama'),
+                            Eylem(tur='durum', veri='SARJA_GIT'),
+                            Eylem(tur='nav_git', veri=self.sarj),
+                        ]
+                    else:
+                        self._gecis('BOSTA', t, neden='kol kavrama zaman asimi')
+                        return [
+                            Eylem(tur='durum', veri='BASARISIZ kavrama'),
+                        ]
 
         elif self.durum == 'KOL_BIRAK':
             if gecen >= self.ayar.kol_zaman_asimi:
+                self._nesne_tutuluyor = False
                 self._gecis('EVE_DON', t, neden='kol birakma zaman asimi, eve donuluyor')
                 return [
                     Eylem(tur='durum', veri='EVE_DON'),
@@ -405,18 +721,51 @@ class GorevYoneticisi:
 
         elif self.durum == 'EVE_DON':
             if gecen >= self.ayar.eve_don_zaman_asimi:
-                self._gecis('BOSTA', t, neden='eve donus zaman asimi')
                 self.aktif_nesne = None
-                return [
-                    Eylem(tur='nav_iptal', veri=None),
-                    Eylem(tur='durum', veri='BOSTA'),
-                ]
+                if self._gorev_bitince_sarja_git or self._pil_uyari or self._pil_kritik:
+                    self.sarj_deneme = 0
+                    self._gecis('SARJA_GIT', t, neden='eve donus zaman asimi, sarja gidiliyor')
+                    durum_metni = 'SARJA_GIT nesne tutuluyor' if (self._nesne_tutuluyor or self._tasima_hatasi) else 'SARJA_GIT'
+                    return [
+                        Eylem(tur='nav_iptal', veri=None),
+                        Eylem(tur='durum', veri=durum_metni),
+                        Eylem(tur='nav_git', veri=self.sarj),
+                    ]
+                else:
+                    self._gecis('BOSTA', t, neden='eve donus zaman asimi')
+                    return [
+                        Eylem(tur='nav_iptal', veri=None),
+                        Eylem(tur='durum', veri='BOSTA'),
+                    ]
+
+        elif self.durum == 'SARJA_GIT':
+            if gecen >= self.ayar.sarj_zaman_asimi:
+                if self.sarj_deneme < self.ayar.max_sarj_yeniden_dene:
+                    self.sarj_deneme += 1
+                    self._gecis(
+                        'SARJA_GIT',
+                        t,
+                        neden=f'sarja git zaman asimi yeniden deneme ({self.sarj_deneme})',
+                    )
+                    durum_metni = 'SARJA_GIT nesne tutuluyor' if self._nesne_tutuluyor else 'SARJA_GIT'
+                    return [
+                        Eylem(tur='nav_iptal', veri=None),
+                        Eylem(tur='durum', veri=durum_metni),
+                        Eylem(tur='nav_git', veri=self.sarj),
+                    ]
+                else:
+                    self._sarj_basarisiz = True
+                    self._gecis('BOSTA', t, neden='sarja git zaman asimi')
+                    return [
+                        Eylem(tur='nav_iptal', veri=None),
+                        Eylem(tur='durum', veri='BASARISIZ sarj'),
+                    ]
 
         return []
 
 
 def load_nesneler(path: str) -> Dict[str, Any]:
-    """YAML dosyasından ev, bırakma ve nesne koordinatlarını yükler ve doğrular."""
+    """YAML dosyasından ev, bırakma, şarj ve nesne koordinatlarını yükler ve doğrular."""
     with open(path, 'r', encoding='utf-8') as f:
         data = yaml.safe_load(f)
 
@@ -468,6 +817,34 @@ def load_nesneler(path: str) -> Dict[str, Any]:
             except (TypeError, ValueError) as err:
                 raise ValueError("Bırakma koordinatları sayısal olmalıdır.") from err
 
+    sarj: Poz2D = ev
+    if 'sarj' in data and data['sarj'] is not None:
+        s_data = data['sarj']
+        if not isinstance(s_data, dict):
+            raise ValueError(f"'{path}' sarj pozu bir sözlük olmalıdır.")
+        if 'x' in s_data and 'y' in s_data:
+            try:
+                sx = float(s_data['x'])
+                sy = float(s_data['y'])
+                syaw = float(s_data.get('yaw_derece', s_data.get('yaw', 0.0)))
+                sarj = Poz2D(sx, sy, syaw)
+            except (TypeError, ValueError) as err:
+                raise ValueError("Sarj koordinatları sayısal olmalıdır.") from err
+
+    pil_ayar = PilAyari()
+    if 'pil' in data and data['pil'] is not None:
+        p_data = data['pil']
+        if not isinstance(p_data, dict):
+            raise ValueError(f"'{path}' pil ayarları bir sözlük olmalıdır.")
+        try:
+            pil_ayar = PilAyari(
+                uyari_v=float(p_data.get('uyari_v', 11.0)),
+                kritik_v=float(p_data.get('kritik_v', 10.5)),
+                tampon_s=float(p_data.get('tampon_s', 10.0)),
+            )
+        except (TypeError, ValueError) as err:
+            raise ValueError("Pil ayarları sayısal olmalıdır.") from err
+
     ayar_dict = data.get('ayar', {})
     ayar = Ayar(**ayar_dict) if isinstance(ayar_dict, dict) else Ayar()
 
@@ -475,6 +852,9 @@ def load_nesneler(path: str) -> Dict[str, Any]:
         'nesneler': nesneler,
         'ev': ev,
         'birakma': birakma,
+        'sarj': sarj,
+        'pil_ayar': pil_ayar,
+        'pil': pil_ayar,
         'ayar': ayar,
     }
 
