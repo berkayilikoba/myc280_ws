@@ -11,3 +11,10 @@ Nesne algısı arayüzü: `/kavrama/nesne_algi` (geometry_msgs/PointStamped, her
 veya camera_color_optical_frame), 2–10 Hz, nesne kamera görüşünde ve ~1.5 m içindeyken gelir; arada gelmeyebilir.
 Kod Türkçe adlandırma ve yorumlarla, mevcut dosyaların üslubunda yazılsın. Kodu çalıştıramazsın; Claude test edecek.
 Sonunda kısa özet yaz.
+
+## Caveman araçları (her görevde kullan)
+`caveman` MCP sunucusu bağlı (izin: `mcp(caveman/*)`).
+- Büyük dosya/çıktıyı (≳200 satır) bağlama almadan önce `caveman_compress`; kaybolan ayrıntı için `caveman_retrieve`.
+  Düzenleyeceğin satırları her zaman özgün dosyadan birebir oku (sıkıştırılmış metinden düzenleme yapma).
+- Tablo biçimli JSON'u alıntılamadan önce `caveman_toon_encode`.
+- Görev sonunda `caveman_stats` çağır, çıktısını raporuna ekle.
