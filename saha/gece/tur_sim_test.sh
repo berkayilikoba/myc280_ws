@@ -16,11 +16,11 @@ setsid ros2 launch limo_bringup limo_sim_nav2.launch.py headless:=true use_rviz:
 # Sıra önemli (kilitlenme): AMCL başlangıç pozu gelmeden map->odom yayınlamaz; Nav2 planner etkinleşmesi bu TF'i
 # bekler. Önce AMCL'i bekle, pozu ver, SONRA bt_navigator'ı bekle.
 if ! echo "$EK" | grep -q "localization:=yok"; then   # yok: AMCL yok, map->odom sabit
-for i in $(seq 1 60); do sleep 3; ros2 lifecycle get --no-daemon /amcl 2>/dev/null | grep -q active && break; done
+python3 $WS/saha/gece/bekle_aktif.py /amcl 180
 python3 $WS/saha/gece/ilk_poz.py 0 0 0 || exit 1
 fi
-for i in $(seq 1 60); do sleep 3; ros2 lifecycle get --no-daemon /bt_navigator 2>/dev/null | grep -q active && break; done
-ros2 lifecycle get --no-daemon /bt_navigator 2>/dev/null | grep -q active || { echo "Nav2 açılmadı"; exit 1; }
+python3 $WS/saha/gece/bekle_aktif.py /bt_navigator 180
+python3 $WS/saha/gece/bekle_aktif.py /bt_navigator 5 || { echo "Nav2 açılmadı"; exit 1; }
 echo "== tur ($EK)"
 timeout 1500 python3 $WS/src/limo_bringup/scripts/nav_bench.py --mode diff --out $OUT/tur.json --timeout 150 \
   --hedefler $WS/src/limo_bringup/scripts/nav_tur_lab_oda.yaml $(echo "$EK" | grep -q "localization:=yok" && echo "--lokalizasyon yok") > $OUT/tur.log 2>&1; echo "cikis $?"

@@ -18,10 +18,10 @@ setsid ros2 launch limo_bringup limo_sim_nav2.launch.py headless:=true use_rviz:
 # Nav2 hazır: bt_navigator aktif
 # Sıra önemli (kilitlenme): AMCL başlangıç pozu gelmeden map->odom yayınlamaz; Nav2 planner etkinleşmesi bu TF'i
 # bekler. Önce AMCL'i bekle, pozu ver, SONRA bt_navigator'ı bekle.
-for i in $(seq 1 60); do sleep 3; ros2 lifecycle get --no-daemon /amcl 2>/dev/null | grep -q active && break; done
+python3 $WS/saha/gece/bekle_aktif.py /amcl 180
 python3 $WS/saha/gece/ilk_poz.py 0 0 0 || exit 1
-for i in $(seq 1 60); do sleep 3; ros2 lifecycle get --no-daemon /bt_navigator 2>/dev/null | grep -q active && break; done
-ros2 lifecycle get --no-daemon /bt_navigator 2>/dev/null | grep -q active || { echo "Nav2 açılmadı"; exit 1; }
+python3 $WS/saha/gece/bekle_aktif.py /bt_navigator 180
+python3 $WS/saha/gece/bekle_aktif.py /bt_navigator 5 || { echo "Nav2 açılmadı"; exit 1; }
 setsid ros2 run limo_autonomy kavrama --ros-args -p use_sim_time:=true -p harita:=$HARITA > $OUT/kavrama.log 2>&1 & PIDS+=($!)
 sleep 5
 python3 - "$HEDEF" > $OUT/hedefler.txt <<'PY'

@@ -15,10 +15,10 @@ setsid ros2 launch limo_bringup limo_sim_nav2.launch.py headless:=true use_rviz:
   map:=$HARITA world:=$WS/install/limo_car/share/limo_car/worlds/lab_oda_3b.world > $OUT/sim.log 2>&1 & PIDS+=($!)
 # Sıra önemli (kilitlenme): AMCL başlangıç pozu gelmeden map->odom yayınlamaz; Nav2 planner etkinleşmesi bu TF'i
 # bekler. Önce AMCL'i bekle, pozu ver, SONRA bt_navigator'ı bekle.
-for i in $(seq 1 60); do sleep 3; ros2 lifecycle get --no-daemon /amcl 2>/dev/null | grep -q active && break; done
+python3 $WS/saha/gece/bekle_aktif.py /amcl 180
 python3 $WS/saha/gece/ilk_poz.py 0 0 0 || exit 1
-for i in $(seq 1 60); do sleep 3; ros2 lifecycle get --no-daemon /bt_navigator 2>/dev/null | grep -q active && break; done
-ros2 lifecycle get --no-daemon /bt_navigator 2>/dev/null | grep -q active || { echo "Nav2 açılmadı"; exit 1; }
+python3 $WS/saha/gece/bekle_aktif.py /bt_navigator 180
+python3 $WS/saha/gece/bekle_aktif.py /bt_navigator 5 || { echo "Nav2 açılmadı"; exit 1; }
 # 1) eylem arayüzü: dolap (sahte algı dolabın konumunda)
 setsid ros2 launch limo_autonomy kavrama.launch.py use_sim_time:=true sahte_algi:=true nesne_x:=3.73 nesne_y:=2.18 nesne_z:=0.30 \
   > $OUT/kavrama1.log 2>&1 & K1=$!; PIDS+=($K1); sleep 8
