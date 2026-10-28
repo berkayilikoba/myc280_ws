@@ -220,7 +220,9 @@ controller_server:
         offset_from_furthest: 4
         threshold_to_consider: 0.5
         max_angle_to_furthest: 1.0
-        forward_preference: false
+        # true: yol geri yönde hizalanmaz. false iken 180° bakan robot 2.5 m'yi geri geri sürüyordu (masa_onu->kuzeydogu
+        # 26/28 s geri; lidar arkayı görmüyor -123°..+141°). true: 15 s, 1.5 s geri; tur 123 -> 111 s (28.10 sim).
+        forward_preference: true
 
 local_costmap:
   local_costmap:

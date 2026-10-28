@@ -59,3 +59,4 @@ Bitince: `ajan rapor <etiket>` → diff oku → testleri KENDİN çalıştır �
 - R2 (argon, algı sapması incelemesi) GÜVENİLMEZ: var olmayan fonksiyon/parametre alıntıladı (`_derinlik_oku_iki_asamali`, `golge_band=6`, `zemin_kayip=0.80`); gölge yönü yanlış. Doğru kalan: 0.6 m ilk aşama varsayımı var.
 - N20 sonrası menzile göre algı sapması (algi9): ≤1 m dx +0.5…+1.3 cm; ≥1.5 m ~+3.5 cm (≈ r; uzakta az pikselde derinlik merkeze yakın, +r fazla). dy ~0. z +1.5 cm sabit (gerçek z kaynağı doğrulanmalı). Kavramaya etkisi yok (son yaklaşma <0.6 m); Q planına ~3.5 cm.
 - Gerileme (12:15): normal tur 7/7 123 s; vio_kotu+AMCL 7/7 146 s; kavrama dolap 0.76 cm/1.4°, duvar 0.28 cm/0.6°.
+- MPPI PathAngleCritic forward_preference true (13:00): masa_onu→kuzeydogu 28 s/26 s geri → 15 s/1.5 s geri (5 tekrar); tur 123→111 s 7/7; kavrama dolap 0.8 cm/1.4°, duvar 0.6 cm/1.3° (16 s, önce 23.5); kamera algılı görev TAMAM 0.9 cm.
