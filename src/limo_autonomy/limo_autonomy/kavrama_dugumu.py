@@ -330,6 +330,98 @@ def nav_q_durum_gecisi(
 
 
 # ---------------------------------------------------------------------------
+# Hareketli Engel Kalkanı Entegrasyonu İçin ROS'suz Saf Fonksiyonlar (N24)
+# ---------------------------------------------------------------------------
+
+
+def kalkan_dur_mu(durum_metni: str | None) -> bool:
+    """Durum metninin 'DUR' kararı içerip içermediğini döndürür (ROS'suz saf fonksiyon)."""
+    if not durum_metni:
+        return False
+    s_upper = str(durum_metni).strip().upper()
+    return s_upper == 'DUR' or s_upper.startswith(('DUR ', 'DUR:', 'DUR='))
+
+
+def kalkan_yavas_mi(durum_metni: str | None) -> bool:
+    """Durum metninin 'YAVAS' kararı içerip içermediğini döndürür (ROS'suz saf fonksiyon)."""
+    if not durum_metni:
+        return False
+    s_upper = str(durum_metni).strip().upper()
+    return s_upper == 'YAVAS' or s_upper.startswith(('YAVAS ', 'YAVAS:', 'YAVAS='))
+
+
+def kalkan_uygula(
+    vx: float,
+    wz: float,
+    durum_metni: str | None,
+) -> tuple[float, float]:
+    """Kalkan durum metnine göre hız komutunu filtreler (ROS'suz saf fonksiyon).
+
+    Parametreler:
+        vx: Doğrusal hız komutu (m/s).
+        wz: Açısal hız komutu (rad/s).
+        durum_metni: /hareketli_kalkan/durum metni (örn. 'DUR ttc=1.2s v=0.5',
+                     'YAVAS ttc=2.0s', 'serbest', 'ODOM_YOK', None).
+
+    Kural:
+        - 'DUR': vx = 0.0 yapılır, wz korunur (yerinde dönüş serbest).
+          Geri çekilmede (vx < 0) de DUR durumunda vx = 0 yapılır; çünkü
+          hareketli engelin robota göre konumu/yönü (önde mi arkada mı olduğu)
+          bu durum metninden bilinmemektedir ve engel robotun arkasında
+          olabilir.
+        - 'YAVAS': vx = vx * 0.5 yapılır, wz korunur.
+        - diğer / None: vx ve wz aynen korunur.
+
+    Döndürür:
+        (vx_yeni, wz_yeni)
+    """
+    vx_val = float(vx)
+    wz_val = float(wz)
+    if not durum_metni:
+        return (vx_val, wz_val)
+
+    s = str(durum_metni).strip()
+    s_upper = s.upper()
+
+    if s_upper == 'DUR' or s_upper.startswith(('DUR ', 'DUR:', 'DUR=')):
+        # Geri çekilmede (vx < 0) de DUR'da vx=0 (engel arkada olabilir; kalkan yönü bilinmiyor)
+        return (0.0, wz_val)
+    elif s_upper == 'YAVAS' or s_upper.startswith(('YAVAS ', 'YAVAS:', 'YAVAS=')):
+        return (vx_val * 0.5, wz_val)
+    else:
+        return (vx_val, wz_val)
+
+
+def kalkan_bekleme_kontrolu(
+    dur_baslangic_t: float | None,
+    simdi_t: float,
+    kalkan_durum: str | None,
+    maks_bekleme: float = 15.0,
+) -> tuple[bool, float | None, float]:
+    """Kalkan DUR durumunun süresini ve zaman aşımını denetler (ROS'suz saf fonksiyon).
+
+    Parametreler:
+        dur_baslangic_t: DUR durumunun başladığı zaman damgası (s) veya None.
+        simdi_t: Geçerli zaman damgası (s).
+        kalkan_durum: Kalkan durum dizesi (örn. 'DUR ttc=1.2s v=0.4', 'serbest', None).
+        maks_bekleme: İzin verilen azami bekleme süresi (s, varsayılan 15.0).
+
+    Döndürür:
+        (asildi_mi, yeni_dur_baslangic_t, gecen_sure_s):
+            asildi_mi (bool): DUR süresi maks_bekleme'yi aştıysa True.
+            yeni_dur_baslangic_t (float | None): Güncel başlangıç zamanı (DUR değilse None).
+            gecen_sure_s (float): Kesintisiz DUR durumunda geçen toplam süre (s).
+    """
+    if not kalkan_dur_mu(kalkan_durum):
+        return (False, None, 0.0)
+
+    baslangic = float(simdi_t) if dur_baslangic_t is None else float(dur_baslangic_t)
+    gecen = float(simdi_t) - baslangic
+    asildi = gecen > float(maks_bekleme)
+    return (asildi, baslangic, gecen)
+
+
+# ---------------------------------------------------------------------------
 # Eylem (Action) İçin ROS'suz Saf Yardımcı Fonksiyonlar ve Sınıflar
 # ---------------------------------------------------------------------------
 
@@ -458,6 +550,13 @@ def durum_metni_ayristir(metin: str) -> tuple[str, str]:
     s = str(metin or '').strip()
     if not s:
         return ('', '')
+    if s.startswith('HATA:'):
+        parcalar = s.split(None, 1)
+        durum = 'HATA'
+        ayrinti_1 = parcalar[0][5:].strip()
+        ayrinti_2 = parcalar[1].strip() if len(parcalar) > 1 else ''
+        ayrinti = f'{ayrinti_1} {ayrinti_2}'.strip()
+        return (durum, ayrinti)
     parcalar = s.split(None, 1)
     durum = parcalar[0]
     ayrinti = parcalar[1].strip() if len(parcalar) > 1 else ''
@@ -756,6 +855,11 @@ class KavramaDugumu(Node):
         scan_konu = p('scan_topic', 'scan').value
         odom_konu = p('odom_topic', 'odom').value
 
+        # Hareketli engel kalkanı entegrasyon parametreleri (N24)
+        kalkan_konu = str(p('kalkan_konu', '/hareketli_kalkan/durum').value)
+        self.kalkan_uy = bool(p('kalkan_uy', True).value)
+        self.kalkan_maks_bekleme = float(p('kalkan_maks_bekleme', 15.0).value)
+
         # Eşzamanlılık ve TF
         self.cb = ReentrantCallbackGroup()
         self.tf = Buffer()
@@ -776,6 +880,7 @@ class KavramaDugumu(Node):
         self.create_subscription(PointStamped, '/kavrama/hedef', self._hedef_cb, 10, callback_group=self.cb)
         self.create_subscription(PointStamped, '/kavrama/nesne_algi', self._nesne_algi_cb, 10, callback_group=self.cb)
         self.create_subscription(Empty, '/kavrama/iptal', self._iptal_cb, 10, callback_group=self.cb)
+        self.create_subscription(String, kalkan_konu, self._kalkan_cb, 10, callback_group=self.cb)
 
         # Durum Değişkenleri
         self.durum_kodu: str = 'BOSTA'  # 'BOSTA', 'PLAN', 'NAV_Q', 'SON_YAKLASMA', 'HAZIR', 'KURTARMA', 'HATA'
@@ -784,6 +889,12 @@ class KavramaDugumu(Node):
         self.son_algi_odom: tuple[float, float] | None = None
         self.yeni_algi_var: bool = False
         self.aktif_nav_goal = None
+
+        # Hareketli engel kalkanı durum değişkenleri (N24)
+        self.kalkan_durum: str | None = None
+        self.kalkan_durum_zamani: float | None = None
+        self._kalkan_dur_baslangic_t: float | None = None
+        self._kalkan_bekleme_bildirildi: bool = False
 
         self.nesne_hedef_map: tuple[float, float, float] | None = None
         self.nesne_yedek_odom: tuple[float, float] | None = None
@@ -1076,6 +1187,12 @@ class KavramaDugumu(Node):
             float(yaw_q(m.pose.pose.orientation)),
         )
 
+    def _kalkan_cb(self, msg: String) -> None:
+        """/hareketli_kalkan/durum konusundan gelen son kalkan kararını saklar (N24)."""
+        with self._durum_kilit:
+            self.kalkan_durum = str(msg.data)
+            self.kalkan_durum_zamani = self._simdi_s()
+
     def _scan_cb(self, m: LaserScan) -> None:
         try:
             t = self.tf.lookup_transform(
@@ -1150,6 +1267,8 @@ class KavramaDugumu(Node):
                     pass
                 self.aktif_nav_goal = None
             self._durdur()
+            self._kalkan_dur_baslangic_t = None
+            self._kalkan_bekleme_bildirildi = False
             self.durum_kodu = 'HATA'
         self.durum('HATA iptal')
 
@@ -1406,6 +1525,8 @@ class KavramaDugumu(Node):
 
         self.t_son_yaklasma_baslangic = self.get_clock().now()
         self.son_durum_log_zamani = 0.0
+        self._kalkan_dur_baslangic_t = None
+        self._kalkan_bekleme_bildirildi = False
         self.durum_kodu = 'SON_YAKLASMA'
         self.durum(son_baslangic_mesaji)
 
@@ -1446,6 +1567,8 @@ class KavramaDugumu(Node):
         self._son_hata_cm = float(e_xy * 100.0)
         self._son_yon_hatasi_deg = float(math.degrees(e_yaw))
         self._son_sure_s = float(sure)
+        self._kalkan_dur_baslangic_t = None
+        self._kalkan_bekleme_bildirildi = False
         self.durum_kodu = 'HAZIR'
 
         self.durum(
@@ -1462,6 +1585,8 @@ class KavramaDugumu(Node):
             return
 
         self.kurtarma_baslangic_odom = self.odom
+        self._kalkan_dur_baslangic_t = None
+        self._kalkan_bekleme_bildirildi = False
         self.durum_kodu = 'KURTARMA'
         self.durum(
             f'KURTARMA {neden}: odomla düz 0.20 m geri çekiliniyor '
@@ -1558,6 +1683,32 @@ class KavramaDugumu(Node):
         now = self.get_clock().now()
         t = now.nanoseconds / 1e9
 
+        # Hareketli engel kalkanı bekleme kontrolü ve zaman aşımı ötelemesi (N24)
+        kalkan_bekliyor = bool(self.kalkan_uy and kalkan_dur_mu(self.kalkan_durum))
+        if self.kalkan_uy:
+            asildi, self._kalkan_dur_baslangic_t, gecen_s = kalkan_bekleme_kontrolu(
+                self._kalkan_dur_baslangic_t,
+                t,
+                self.kalkan_durum,
+                self.kalkan_maks_bekleme,
+            )
+            if asildi:
+                self.durum_kodu = 'HATA'
+                self._durdur()
+                self.durum('HATA:kalkan_bekleme')
+                return
+
+            if kalkan_bekliyor and self.son_denetleyici.onceki_t is not None:
+                dt_kalkan = max(0.0, t - self.son_denetleyici.onceki_t)
+                if dt_kalkan > 0.0:
+                    self.son_denetleyici.duraklat(dt_kalkan)
+                    if self.t_son_yaklasma_baslangic is not None:
+                        self.t_son_yaklasma_baslangic += rclpy.duration.Duration(
+                            nanoseconds=int(dt_kalkan * 1e9)
+                        )
+        else:
+            self._kalkan_dur_baslangic_t = None
+
         # Ölçüm belirleme: /kavrama/nesne_algi geldiyse kullan, yoksa başlangıçta map konumu tek ölçüm
         olcum_robot = None
         if self.yeni_algi_var and self.son_algi_odom is not None:
@@ -1598,20 +1749,31 @@ class KavramaDugumu(Node):
             self._hazir_isle(bilgi)
             return
         elif adim_durum.startswith('HATA'):
-            self.durum_kodu = 'GECIS'
-            self._durdur()
-            self._kurtarma_baslat(adim_durum)
-            return
+            if kalkan_bekliyor:
+                # Kalkan DUR durumundayken engelden kaynaklı HATA durumlarında
+                # KURTARMA yerine bekleme sürdürülür (insan önünde geçiş bekleniyor).
+                v, w = 0.0, 0.0
+            else:
+                self.durum_kodu = 'GECIS'
+                self._durdur()
+                self._kurtarma_baslat(adim_durum)
+                return
+
+        # Kalkan hız filtreleme (kavramanın yayınladığı her komut kalkan_uygula'dan geçer)
+        v_cikis, w_cikis = (float(v), float(w))
+        if self.kalkan_uy:
+            v_cikis, w_cikis = kalkan_uygula(v_cikis, w_cikis, self.kalkan_durum)
 
         # Komut yayınla
         cmd = Twist()
-        cmd.linear.x = float(v)
-        cmd.angular.z = float(w)
+        cmd.linear.x = float(v_cikis)
+        cmd.angular.z = float(w_cikis)
         self.p_cmd.publish(cmd)
 
         rho = float(bilgi.get('rho', float('nan')))
         algisiz_bilgi = 'algisiz ' if self.algisiz else ''
-        ayrinti_metni = f'{algisiz_bilgi}v={v:.2f} w={w:.2f} rho={rho:.2f} m'
+        kalkan_bilgi = 'KALKAN_BEKLE ' if kalkan_bekliyor else ''
+        ayrinti_metni = f'{kalkan_bilgi}{algisiz_bilgi}v={v_cikis:.2f} w={w_cikis:.2f} rho={rho:.2f} m'
 
         # Eylem geri bildirimi: SON_YAKLASMA durumunda 5 Hz (kalan_mesafe_m = rho)
         self._eylem_geri_bildirim_yayinla(
@@ -1621,8 +1783,14 @@ class KavramaDugumu(Node):
             zorla=False,
         )
 
-        # 1 Hz aralıkla periyodik durum yayını (/kavrama/durum)
-        if (t - self.son_durum_log_zamani) > 1.0:
+        yeni_kalkan_dur_gecisi = kalkan_bekliyor and not self._kalkan_bekleme_bildirildi
+        if kalkan_bekliyor:
+            self._kalkan_bekleme_bildirildi = True
+        else:
+            self._kalkan_bekleme_bildirildi = False
+
+        # 1 Hz aralıkla periyodik durum yayını (/kavrama/durum) veya DUR başlangıcında anında yayın
+        if yeni_kalkan_dur_gecisi or (t - self.son_durum_log_zamani) > 1.0:
             self.son_durum_log_zamani = t
             self.durum(f'SON_YAKLASMA {ayrinti_metni}')
 
@@ -1631,6 +1799,22 @@ class KavramaDugumu(Node):
             return
         if self.odom is None or self.kurtarma_baslangic_odom is None:
             return
+
+        now_s = self._simdi_s()
+        if self.kalkan_uy:
+            asildi, self._kalkan_dur_baslangic_t, _ = kalkan_bekleme_kontrolu(
+                self._kalkan_dur_baslangic_t,
+                now_s,
+                self.kalkan_durum,
+                self.kalkan_maks_bekleme,
+            )
+            if asildi:
+                self.durum_kodu = 'HATA'
+                self._durdur()
+                self.durum('HATA:kalkan_bekleme')
+                return
+        else:
+            self._kalkan_dur_baslangic_t = None
 
         x, y, _ = self.odom
         x0, y0, _ = self.kurtarma_baslangic_odom
@@ -1642,14 +1826,20 @@ class KavramaDugumu(Node):
         )
 
         if not bitti:
+            v_kurtarma = -0.08
+            w_kurtarma = 0.0
+            if self.kalkan_uy:
+                v_kurtarma, w_kurtarma = kalkan_uygula(v_kurtarma, w_kurtarma, self.kalkan_durum)
+
             cmd = Twist()
-            cmd.linear.x = -0.08
-            cmd.angular.z = 0.0
+            cmd.linear.x = float(v_kurtarma)
+            cmd.angular.z = float(w_kurtarma)
             self.p_cmd.publish(cmd)
         else:
             # Durumu aday artırma/NAV_Q başlatmadan ÖNCE geçiş durumuna al
             self.durum_kodu = yeni_durum  # 'GECIS'
             self._durdur()
+            self._kalkan_dur_baslangic_t = None
             self.kurtarma_sayisi = yeni_kurtarma
             self.aktif_aday_idx = yeni_idx
             self.durum(

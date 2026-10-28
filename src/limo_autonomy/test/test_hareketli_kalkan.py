@@ -20,10 +20,13 @@ import numpy as np
 import pytest
 
 from limo_autonomy.hareketli_kalkan import (
+    EslestirmeSonucu,
     HareketliKalkan,
     Iz,
     IzTakipci,
+    belirsiz_izler_kumesi,
     carpismaya_kalan_sure,
+    eslestir,
     kalkan_karari,
     komutu_olcekle,
     kume_merkezleri_odoma,
@@ -883,3 +886,235 @@ def test_b2_3_tarama_zaman_asimi_dur_tutma_ve_tarama_yok() -> None:
     assert node.p_durum.publish.call_args[0][0].data == 'TARAMA_YOK'
     cikis_twist2 = node.p_cmd.publish.call_args[0][0]
     assert cikis_twist2.linear.x == 0.40
+
+
+def test_n25_eslestir_saf_fonksiyon() -> None:
+    """N25: eslestir saf fonksiyonunun öngörülen konum, dinamik kapı ve açgözlü eşlemesi."""
+    # 1. Durağan iki iz ve iki küme: en yakın olanlar eşleşir
+    iz1 = Iz(id=1, x=1.0, y=0.0, r=0.2, vx=0.0, vy=0.0, t_son=0.0)
+    iz2 = Iz(id=2, x=2.0, y=0.0, r=0.2, vx=0.0, vy=0.0, t_son=0.0)
+    kumeler = [(2.05, 0.0), (1.02, 0.0)]  # kume 0 iz2'ye, kume 1 iz1'e yakın
+
+    sonuc = eslestir([iz1, iz2], kumeler, t=0.0, kapi=0.35)
+    assert len(sonuc) == 2
+    # iz1 -> kume 1 (mesafe 0.02), iz2 -> kume 0 (mesafe 0.05)
+    eslesme_dict = dict(sonuc)
+    assert eslesme_dict[0] == 1
+    assert eslesme_dict[1] == 0
+    assert len(sonuc.eslesmeyen_izler) == 0
+    assert len(sonuc.eslesmeyen_kumeler) == 0
+
+    # 2. Hareketli iz: öngörülen konum (x + vx*dt) kullanılır
+    # iz_hizli: x=1.0'da ama vx=0.5 m/s. t=0.2 s'de öngörülen konumu 1.10 m
+    iz_hizli = Iz(id=3, x=1.0, y=0.0, r=0.2, vx=0.5, vy=0.0, t_son=0.0)
+    # Küme 1.12'de (öngörülen konuma 0.02 m, eski konuma 0.12 m)
+    sonuc_hizli = eslestir([iz_hizli], [(1.12, 0.0)], t=0.2, kapi=0.35)
+    assert len(sonuc_hizli) == 1
+    assert sonuc_hizli[0] == (0, 0)
+
+    # 3. Dinamik kapı büyümesi: kapi = eslesme_kapi + |v|*dt
+    # dt = 0.3 s, v = 0.5 m/s -> dinamik kapı = 0.35 + 0.15 = 0.50 m
+    # Eski konuma uzaklık 0.45 m (> taban kapı 0.35 m, ama < dinamik kapı 0.50 m)
+    iz_kapi = Iz(id=4, x=1.0, y=0.0, r=0.2, vx=0.5, vy=0.0, t_son=0.0)
+    # t=0.3'te öngörü 1.15 m, küme 1.45 m'de (öngörüye 0.30 m < 0.50 m)
+    sonuc_kapi = eslestir([iz_kapi], [(1.45, 0.0)], t=0.3, kapi=0.35)
+    assert len(sonuc_kapi) == 1
+
+    # 4. Kapı dışındaki küme eşleşmez
+    sonuc_bos = eslestir([iz1], [(5.0, 5.0)], t=0.0, kapi=0.35)
+    assert len(sonuc_bos) == 0
+    assert sonuc_bos.eslesmeyen_izler == [0]
+    assert sonuc_bos.eslesmeyen_kumeler == [0]
+
+
+def test_n25_belirsizlik_daraltilmis() -> None:
+    """N25: Belirsizlik sıfırlamasının daraltılması (d2 - d1 < belirsizlik_payi VE d1 > 0.10 m)."""
+    # a) d2 - d1 < 0.05 VE d1 > 0.10 m -> BELİRSİZ (hız sıfırlanır, görülme yarıya indirilir)
+    # İz (1.0, 0.0)'da, iki aday: (1.12, 0.0) [d1=0.12] ve (1.15, 0.0) [d2=0.15]
+    # d1 = 0.12 > 0.10, d2 - d1 = 0.03 < 0.05
+    iz_belirsiz = Iz(id=1, x=1.0, y=0.0, r=0.2, vx=0.0, vy=0.0, gorulme=4, yas=5, t_son=0.0)
+    # (vx=0: takipçi öngörülen konumu kullanır; hızlı izde öngörü d1<0.10 yapıp belirsizliği zaten çözer)
+    kumeler_belirsiz = [(1.12, 0.0), (1.15, 0.0)]
+    belirsiz = belirsiz_izler_kumesi([iz_belirsiz], kumeler_belirsiz, t=0.0, kapi=0.35, belirsizlik_payi=0.05)
+    assert 0 in belirsiz
+
+    # Takipçide güncelleme ile hızın sıfırlandığı ve görülmenin SIFIRLANMAYIP yarıya indiği (4 -> 2)
+    takipci = IzTakipci(kapi=0.35, alfa=0.4, silme_suresi=0.5, belirsizlik_payi=0.05)
+    takipci._izler = [iz_belirsiz]
+    takipci.guncelle(kumeler_belirsiz, [0.2, 0.2], t=0.1)
+    iz_sonuc = [iz for iz in takipci.izler() if iz.id == 1][0]
+    assert iz_sonuc.vx == 0.0 and iz_sonuc.vy == 0.0
+    assert iz_sonuc.gorulme == 2, f"Görülme 4'ten 2'ye inmeli (sıfırlanmamalı), bulunan: {iz_sonuc.gorulme}"
+
+    # b) d1 <= 0.10 m -> BELİRSİZ DEĞİL (adaylardan biri çok yakın, net eşleşme)
+    # d1 = 0.04, d2 = 0.06 (d2 - d1 = 0.02 < 0.05 ama d1 <= 0.10)
+    iz_net = Iz(id=2, x=1.0, y=0.0, r=0.2, vx=0.0, vy=0.0, gorulme=2, yas=2, t_son=0.0)
+    kumeler_net = [(1.04, 0.0), (1.06, 0.0)]
+    belirsiz_net = belirsiz_izler_kumesi([iz_net], kumeler_net, t=0.0, kapi=0.35, belirsizlik_payi=0.05)
+    assert len(belirsiz_net) == 0
+
+    # c) d2 - d1 >= 0.05 m -> BELİRSİZ DEĞİL (en iyi aday belirgin biçimde daha yakın)
+    # d1 = 0.12, d2 = 0.22 (d2 - d1 = 0.10 >= 0.05)
+    iz_ayrik = Iz(id=3, x=1.0, y=0.0, r=0.2, vx=0.0, vy=0.0, gorulme=2, yas=2, t_son=0.0)
+    kumeler_ayrik = [(1.12, 0.0), (1.22, 0.0)]
+    belirsiz_ayrik = belirsiz_izler_kumesi([iz_ayrik], kumeler_ayrik, t=0.0, kapi=0.35, belirsizlik_payi=0.05)
+    assert len(belirsiz_ayrik) == 0
+
+
+def test_n25_daginik_ortamda_insan_onaylanir_ve_ttc_uretir() -> None:
+    """N25 Test (a): 0.4 m arayla 3 durağan küme + aralarından 0.5 m/s geçen insan (6 Hz, gürültü σ 1 cm):
+    İnsan izi en geç 0.7 s'de onaylanır (görülme >= 3, |v| ≈ 0.5) ve TTC kararı üretilir."""
+    takipci = IzTakipci(kapi=0.35, alfa=0.4, silme_suresi=0.5, belirsizlik_payi=0.05)
+    dt = 1.0 / 6.0  # 6 Hz
+    rng = np.random.RandomState(42)
+
+    # 0.4 m arayla 3 durağan küme (x = 1.5 m doğrultusunda)
+    duragan_kumeler = [
+        (1.50, -0.40),
+        (1.50, 0.00),
+        (1.50, 0.40),
+    ]
+
+    # İnsan: x=1.8'den robota (0,0) doğru vx=-0.5 m/s hızla yaklaşıyor, y=0.20'de (K2 ile K3 arasından geçiyor)
+    x_insan_baslangic = 1.80
+    y_insan = 0.20
+    v_insan = -0.50
+
+    onaylandi = False
+    onay_zamani: float | None = None
+    ttc_karari_uretildi = False
+
+    # 0.0 s'den 0.70 s'ye kadar (5 adım: step 0 to 4; step 4 t ≈ 0.667 s <= 0.7 s)
+    toplam_adim = 5
+    for adim in range(toplam_adim):
+        t = adim * dt
+        x_insan = x_insan_baslangic + v_insan * t
+
+        # Ölçümler (sigma = 0.01 m gürültü ile)
+        olcumler: list[tuple[float, float]] = []
+        for gx, gy in duragan_kumeler:
+            gurultu = rng.normal(0.0, 0.01, size=2)
+            olcumler.append((gx + float(gurultu[0]), gy + float(gurultu[1])))
+
+        gurultu_insan = rng.normal(0.0, 0.01, size=2)
+        olcumler.append((x_insan + float(gurultu_insan[0]), y_insan + float(gurultu_insan[1])))
+
+        yaricaplar = [0.15] * len(olcumler)
+        takipci.guncelle(olcumler, yaricaplar, t, robot_wz=0.0)
+
+        karar = kalkan_karari(
+            izler=takipci.izler(),
+            robot_v_odom=(0.0, 0.0),
+            robot_p_odom=(0.0, 0.0),
+            robot_yaricap=0.20,
+            min_engel_hizi=0.20,
+            min_gorulme=3,
+            min_iz_yasi_s=0.35,
+            yon_tutarlilik=0.7,
+            ttc_dur=1.5,
+            ttc_yavas=3.0,
+        )
+
+        # İnsan izini tespit et (x ~ x_insan, y ~ y_insan)
+        for iz in takipci.izler():
+            dx = iz.x - x_insan
+            dy = iz.y - y_insan
+            if math.hypot(dx, dy) < 0.25:
+                # İnsan izi kontrolleri
+                if iz.gorulme >= 3 and abs(iz.v - 0.50) <= 0.10:
+                    onaylandi = True
+                    if onay_zamani is None:
+                        onay_zamani = t
+                    if karar.karar in ('dur', 'yavas'):
+                        ttc_karari_uretildi = True
+
+    assert onaylandi is True, "İnsan izi t <= 0.7 s içinde onaylanmalı (gorulme >= 3, |v| ≈ 0.5)!"
+    assert onay_zamani is not None and onay_zamani <= 0.70 + 1e-4, f"Onay zamanı {onay_zamani:.3f} s > 0.70 s!"
+    assert ttc_karari_uretildi is True, "TTC kararı ('dur' veya 'yavas') üretilmeli!"
+
+
+def test_n25_duragan_kumeler_hareketli_sayilmaz() -> None:
+    """N25 Test (b): 0.4 m arayla durağan kümeler dağınık ortamda hareketli SAYILMAZ (yanlış alarm yok)."""
+    takipci = IzTakipci(kapi=0.35, alfa=0.4, silme_suresi=0.5, belirsizlik_payi=0.05)
+    rng = np.random.RandomState(42)
+
+    duragan_kumeler = [
+        (1.50, -0.40),
+        (1.50, 0.00),
+        (1.50, 0.40),
+    ]
+
+    # 30 adım (5 saniye) boyunca gürültülü durağan ölçümler
+    for adim in range(30):
+        t = adim * (1.0 / 6.0)
+        olcumler: list[tuple[float, float]] = []
+        for gx, gy in duragan_kumeler:
+            gurultu = rng.normal(0.0, 0.01, size=2)
+            olcumler.append((gx + float(gurultu[0]), gy + float(gurultu[1])))
+
+        takipci.guncelle(olcumler, [0.15, 0.15, 0.15], t, robot_wz=0.0)
+
+        karar = kalkan_karari(
+            izler=takipci.izler(),
+            robot_v_odom=(0.0, 0.0),
+            robot_p_odom=(0.0, 0.0),
+            min_engel_hizi=0.20,
+            min_gorulme=3,
+            min_iz_yasi_s=0.35,
+            yon_tutarlilik=0.7,
+            ttc_dur=1.5,
+            ttc_yavas=3.0,
+        )
+
+        assert karar.karar == 'serbest', (
+            f"Adım {adim}'de durağan kümeler için sahte alarm üretilmemeli! Alınan: {karar.karar} ({karar.gerekce})"
+        )
+        assert karar.olcek == 1.0
+
+        for iz in takipci.izler():
+            assert iz.v < 0.20, f"Durağan izin hızı {iz.v:.3f} >= min_engel_hizi 0.20 m/s!"
+
+
+def test_n25_bir_tarama_kacirilan_insan_ayni_kimlikle_devam_eder() -> None:
+    """N25 Test (c): 1 tarama kaçırılan insan izi dinamik kapı ve sabit hız öngörüsüyle aynı kimlikle devam eder."""
+    takipci = IzTakipci(kapi=0.35, alfa=0.4, silme_suresi=0.5, belirsizlik_payi=0.05)
+    dt = 1.0 / 6.0  # ~0.1667 s
+    v_insan = 0.50  # m/s
+
+    # Adım 0 (t = 0.0 s): İnsan ilk kez (1.0, 0.0)'da görülüyor
+    t0 = 0.0
+    x0 = 1.0
+    takipci.guncelle([(x0, 0.0)], [0.20], t0)
+    assert len(takipci.izler()) == 1
+    insan_id = takipci.izler()[0].id
+
+    # Adım 1 (t = 0.167 s): İnsan (1.0833, 0.0)'da görülüyor -> hız oturuyor
+    t1 = dt
+    x1 = x0 + v_insan * t1
+    takipci.guncelle([(x1, 0.0)], [0.20], t1)
+    izler1 = takipci.izler()
+    assert len(izler1) == 1
+    assert izler1[0].id == insan_id
+    assert abs(izler1[0].v - v_insan) < 0.05
+
+    # Adım 2 (t = 0.333 s): 1 TARAMA KAÇIRILDI (sensör boş veya küme tespit edilemedi)
+    t2 = 2 * dt
+    takipci.guncelle([], [], t2)
+    izler2 = takipci.izler()
+    # 0.5 s silme süresi dolmadığı için iz silinmemeli ve hızı korunmalı
+    assert len(izler2) == 1
+    assert izler2[0].id == insan_id
+    assert abs(izler2[0].v - v_insan) < 0.05
+
+    # Adım 3 (t = 0.500 s): İnsan tekrar görülüyor (x3 = 1.0 + 0.5 * 0.5 = 1.25 m)
+    # Öngörülen konum (1.0833 + 0.5 * 0.333 = 1.25 m) ve genişleyen kapı (0.35 + 0.5*0.333 = 0.516 m)
+    t3 = 3 * dt
+    x3 = x0 + v_insan * t3
+    takipci.guncelle([(x3, 0.0)], [0.20], t3)
+    izler3 = takipci.izler()
+
+    # İz kimliği KOPMAMALI, aynı ID ile devam etmeli
+    assert len(izler3) == 1, f"Tek iz beklenirken {len(izler3)} iz bulundu (kimlik kopmuş olabilir)"
+    assert izler3[0].id == insan_id, f"İz ID'si değişti: beklenen {insan_id}, bulunan {izler3[0].id}"
+    assert abs(izler3[0].v - v_insan) <= 0.10, f"Hız kestirimi bozuldu: {izler3[0].v:.3f} m/s"
+    assert izler3[0].gorulme >= 2

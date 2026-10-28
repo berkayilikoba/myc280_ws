@@ -720,3 +720,36 @@ def test_sapma_disaridan_yaw_degismez():
     assert denetleyici.yaklasma_yaw_odom == pytest.approx(sabit_yaw)
 
 
+def test_duraklat_olcum_ve_max_sure_zaman_asimi():
+    """SonYaklasma.duraklat(dt) ile ölçüm ve azami süre sayaçlarının ötelendiği doğrulanır (N24)."""
+    # 1. Ölçüm zaman aşımı testi: olcum_zaman_asimi=1.0 s
+    ayar_olcum = SonYaklasmaAyar(
+        olcum_zaman_asimi=1.0,
+        max_sure=30.0,
+        kayip_tolerans_mesafe=0.20,
+    )
+    sy_olcum = SonYaklasma(ayar=ayar_olcum, yaklasma_yaw_odom=0.0)
+    sy_olcum.adim((0.0, 0.0, 0.0), t=0.0, olcum_robot_xy=(0.50, 0.0))
+
+    # 3.0 saniye duraklatılarak ilerleniyor (dt=0.1s x 30 adım = 3.0s > 1.0s)
+    for i in range(1, 31):
+        sy_olcum.duraklat(0.1)
+        v, w, durum, bilgi = sy_olcum.adim((0.0, 0.0, 0.0), t=i * 0.1, olcum_robot_xy=None)
+        assert durum != 'HATA:zaman_asimi'
+
+    # 2. Azami süre testi: max_sure=2.0 s
+    ayar_sure = SonYaklasmaAyar(
+        olcum_zaman_asimi=100.0,
+        max_sure=2.0,
+    )
+    sy_sure = SonYaklasma(ayar=ayar_sure, yaklasma_yaw_odom=0.0)
+    sy_sure.adim((0.0, 0.0, 0.0), t=0.0, olcum_robot_xy=(0.50, 0.0))
+
+    # 4.0 saniye duraklatılarak ilerleniyor (4.0 s > 2.0 s max_sure)
+    for i in range(1, 41):
+        sy_sure.duraklat(0.1)
+        v, w, durum, _ = sy_sure.adim((0.0, 0.0, 0.0), t=i * 0.1, olcum_robot_xy=None)
+        assert durum != 'HATA:max_sure'
+
+
+
