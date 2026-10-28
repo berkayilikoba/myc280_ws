@@ -17,6 +17,7 @@ SH=$WS/install/limo_bringup/share/limo_bringup
 HARITA=$SH/maps/lab_oda.yaml
 
 ros2 daemon stop >/dev/null 2>&1   # bayat daemon CLI keşfini bozuyordu
+fastdds shm clean >/dev/null 2>&1   # kill -9 sonrası zombi SHM segmentleri DDS keşfini bozuyordu (yalnız kullanılmayanları siler)
 
 PIDS=()
 temizle() {

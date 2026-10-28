@@ -9,7 +9,12 @@ import pytest
 
 from limo_autonomy.renk_algi import (
     boyut_uygun_mu,
+    derinlik_gecerli_pikselleri_ayikla,
     derinlik_medyan_al,
+    derinlik_saglam_hesapla,
+    derinlik_tutarlilik_orani,
+    derinlik_tutarlilik_uygun_mu,
+    derinlik_yuzdelik_al,
     en_buyuk_bilesen_filtrele,
     fiziksel_yaricap_kestir,
     gorunen_yaricap_px_hesapla,
@@ -18,7 +23,9 @@ from limo_autonomy.renk_algi import (
     isin_derinlik_3b,
     k_ayristir,
     kenara_yakin_mi,
+    leke_kutusu_ic_sinirlari,
     maske_bul,
+    menzil_uygun_mu,
     merkez_bul,
     numpy_dan_goruntu_mesaji,
     piksel_isin,
@@ -441,3 +448,201 @@ def test_en_buyuk_bilesen_filtrele_kutu_ver_secenegi():
     assert alan3 == 600
     assert kutu3 == (30, 20, 30, 20)
     assert sinirlayici_kutu_bul(mask, min_alan_px=150) == (30, 20, 30, 20)
+
+
+# ==============================================================================
+# 7. Sağlam Derinlik Seçimi, Tutarlılık ve Azami Menzil Testleri (N20)
+# ==============================================================================
+
+def test_iki_modlu_derinlik_yuzdelik_secimi():
+    """İki modlu derinlik dizisinde (ön yüzey 2.00 m %50, arka plan 2.18 m %50)
+    düşük yüzdelik seçiminin (~30. yüzdelik) ön yüzeye yakın (~2.00 m) döndüğü doğrulanır.
+    """
+    # 50 piksel ön yüzey (2.00 m), 50 piksel arka plan/zemin (2.18 m)
+    derinlikler = np.array([2.00] * 50 + [2.18] * 50, dtype=np.float64)
+
+    # Standart medyan (50. yüzdelik) iki modun ortasına veya arka plana kayar
+    medyan = float(np.median(derinlikler))
+    assert medyan == pytest.approx(2.09, abs=0.01)
+
+    # 30. yüzdelik doğrudan ön yüzey modunu seçmelidir (~2.00 m)
+    d_secilen = derinlik_yuzdelik_al(derinlikler, yuzdelik=30.0)
+    assert d_secilen is not None
+    assert d_secilen == pytest.approx(2.00, abs=0.01)
+
+    # Tutarlılık denetimi: 2.00 m etrafındaki ±0.05 m bandında piksellerin %50'si vardır (>= %40)
+    oran = derinlik_tutarlilik_orani(derinlikler, d_secilen, derinlik_bant_m=0.05)
+    assert oran == pytest.approx(0.50, abs=1e-4)
+    assert derinlik_tutarlilik_uygun_mu(
+        derinlikler, d_secilen, derinlik_bant_m=0.05, min_oran=0.40
+    )
+
+    # Sağlam derinlik hesaplama boru hattı
+    d_sonuc, durum = derinlik_saglam_hesapla(
+        derinlikler,
+        derinlik_yuzdelik=30.0,
+        min_derinlik_piksel=6,
+        derinlik_bant_m=0.05,
+        min_tutarlilik_orani=0.40,
+        maks_menzil_m=3.0,
+        durum_ver=True,
+    )
+    assert durum == 'GECERLI'
+    assert d_sonuc is not None
+    assert d_sonuc == pytest.approx(2.00, abs=0.01)
+
+
+def test_tutarlilik_reddi_arka_plan_agirlikli():
+    """Arka plan ağırlıklı (ön yüzey azınlıkta, arka plan %70-%80) veya dağınık derinlik
+    dağılımında tutarlılık oranının <%40 olması nedeniyle ölçümün reddedildiği doğrulanır.
+    """
+    # Senaryo A: Dağınık zemin/arka plan (%20 ön yüzey 2.00 m, %80 zemin/arka plan 2.18-2.80 m)
+    derinlikler_daginik = np.array(
+        [2.00] * 20 + [2.18] * 20 + [2.35] * 20 + [2.50] * 20 + [2.80] * 20,
+        dtype=np.float64,
+    )
+    d_daginik, durum_daginik = derinlik_saglam_hesapla(
+        derinlikler_daginik,
+        derinlik_yuzdelik=30.0,
+        derinlik_bant_m=0.05,
+        min_tutarlilik_orani=0.40,
+        durum_ver=True,
+    )
+    assert d_daginik is None
+    assert durum_daginik == 'TUTARSIZ_ARKA_PLAN'
+
+    # Senaryo B: İki modlu ancak %65 arka plan (2.18 m), %35 ön yüzey (2.00 m)
+    # 30. yüzdelik 2.00 m seçer, ancak ±0.05 m bandında yalnızca %35 piksel vardır (< %40)
+    derinlikler_70_30 = np.array([2.00] * 35 + [2.18] * 65, dtype=np.float64)
+    d_secilen = derinlik_yuzdelik_al(derinlikler_70_30, yuzdelik=30.0)
+    assert d_secilen == pytest.approx(2.00, abs=0.01)
+
+    oran = derinlik_tutarlilik_orani(derinlikler_70_30, d_secilen, derinlik_bant_m=0.05)
+    assert oran == pytest.approx(0.35, abs=1e-4)
+    assert not derinlik_tutarlilik_uygun_mu(
+        derinlikler_70_30, d_secilen, derinlik_bant_m=0.05, min_oran=0.40
+    )
+
+    d_ret, durum_ret = derinlik_saglam_hesapla(
+        derinlikler_70_30,
+        derinlik_yuzdelik=30.0,
+        derinlik_bant_m=0.05,
+        min_tutarlilik_orani=0.40,
+        durum_ver=True,
+    )
+    assert d_ret is None
+    assert durum_ret == 'TUTARSIZ_ARKA_PLAN'
+
+
+def test_az_piksel_yedek_yola_donus():
+    """Leke içi geçerli piksel sayısı min_derinlik_piksel (vars. 6) altındaysa
+    eski pencere-medyan yedek yoluna dönüldüğü doğrulanır.
+    """
+    # Yalnızca 4 piksel içeren derinlik dizisi (< min_derinlik_piksel=6)
+    derinlikler_az = np.array([2.01, 2.02, 1.99, 2.00], dtype=np.float64)
+    yedek_medyan = 2.05
+
+    # Yedek derinlik mevcutsa 'YEDEK_YOL' ile yedek değer seçilmelidir
+    d_yedek, durum_yedek = derinlik_saglam_hesapla(
+        derinlikler_az,
+        yedek_derinlik=yedek_medyan,
+        min_derinlik_piksel=6,
+        durum_ver=True,
+    )
+    assert d_yedek == pytest.approx(2.05, abs=1e-4)
+    assert durum_yedek == 'YEDEK_YOL'
+
+    # Yedek yoksa 'AZ_PIKSEL' ve None dönmelidir
+    d_bos, durum_bos = derinlik_saglam_hesapla(
+        derinlikler_az,
+        yedek_derinlik=None,
+        min_derinlik_piksel=6,
+        durum_ver=True,
+    )
+    assert d_bos is None
+    assert durum_bos == 'AZ_PIKSEL'
+
+
+def test_maks_menzil_reddi():
+    """maks_menzil_m (varsayılan 3.0 m) üzerindeki uzak ölçümlerin reddedildiği doğrulanır."""
+    assert menzil_uygun_mu(2.95, maks_menzil_m=3.0)
+    assert not menzil_uygun_mu(3.01, maks_menzil_m=3.0)
+    assert not menzil_uygun_mu(3.50, maks_menzil_m=3.0)
+
+    # 3.20 m'deki ölçüm maks_menzil_m=3.0 ile reddedilir
+    derinlikler_uzak = np.array([3.20] * 50, dtype=np.float64)
+    d_uzak, durum_uzak = derinlik_saglam_hesapla(
+        derinlikler_uzak,
+        maks_menzil_m=3.0,
+        durum_ver=True,
+    )
+    assert d_uzak is None
+    assert durum_uzak == 'MAKS_MENZIL_ASILDI'
+
+    # Yedek yolun da maks_menzil sınırını aşması halinde reddedildiği doğrulanır
+    derinlikler_az = np.array([3.50] * 3, dtype=np.float64)
+    d_yedek_uzak, durum_yedek_uzak = derinlik_saglam_hesapla(
+        derinlikler_az,
+        yedek_derinlik=3.50,
+        min_derinlik_piksel=6,
+        maks_menzil_m=3.0,
+        durum_ver=True,
+    )
+    assert d_yedek_uzak is None
+    assert durum_yedek_uzak == 'MAKS_MENZIL_ASILDI'
+
+
+def test_leke_kutusu_ic_sinirlari_ve_ayiklama():
+    """Leke kutusunun iç çekirdek sınırlarının (%25 kenar payı) doğru hesaplandığı ve
+    derinlik görüntüsünden geçerli piksellerin ayıklandığı doğrulanır.
+    """
+    # 40x40 piksellik leke kutusu, merkez (400, 200)
+    # Kenardan %25 içeri -> genişlik 20 px, yükseklik 20 px
+    u_min, u_max, v_min, v_max = leke_kutusu_ic_sinirlari(
+        u_merkez=400.0,
+        v_merkez=200.0,
+        genislik=40.0,
+        yukseklik=40.0,
+        kenar_payi_orani=0.25,
+        goruntu_genislik=848,
+        goruntu_yukseklik=480,
+    )
+    assert u_min == 390
+    assert u_max == 410
+    assert v_min == 190
+    assert v_max == 210
+    assert (u_max - u_min) == 20
+    assert (v_max - v_min) == 20
+
+    # uint16 (mm) derinlik görüntüsü üzerinde ayıklama
+    img_derinlik = np.zeros((480, 848), dtype=np.uint16)
+    img_derinlik[190:210, 390:410] = 2000  # 2.00 metre
+    img_derinlik[195, 395] = 0             # Gürültü (ışın kaybı)
+
+    kirpma = img_derinlik[v_min:v_max, u_min:u_max]
+    pikseller = derinlik_gecerli_pikselleri_ayikla(kirpma)
+    # 20x20 = 400 piksel, 1 bozuk -> 399 geçerli piksel
+    assert len(pikseller) == 399
+    np.testing.assert_allclose(pikseller, 2.00, atol=1e-4)
+
+
+def test_dugum_n20_varsayilan_parametreler():
+    """RenkAlgiDugumu N20 parametrelerinin varsayılan değerleri doğrulanır."""
+    import rclpy
+    from limo_autonomy.renk_algi import RenkAlgiDugumu
+
+    if not rclpy.ok():
+        rclpy.init()
+    try:
+        dugum = RenkAlgiDugumu()
+        assert dugum.get_parameter('derinlik_yuzdelik').value == 30
+        assert dugum.get_parameter('min_derinlik_piksel').value == 6
+        assert dugum.get_parameter('derinlik_bant_m').value == pytest.approx(0.05, abs=1e-4)
+        assert dugum.get_parameter('maks_menzil_m').value == pytest.approx(3.0, abs=1e-4)
+        assert dugum.sayac_yedek_derinlik == 0
+        assert dugum.sayac_tutarsiz_derinlik == 0
+        assert dugum.sayac_asiri_menzil == 0
+        dugum.destroy_node()
+    finally:
+        if rclpy.ok():
+            rclpy.shutdown()

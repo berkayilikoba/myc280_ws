@@ -13,4 +13,5 @@ echo "-- son çıktı dosyaları (son 15 dk)"
 find $G/cikti $WS/saha/nav/cikti -maxdepth 2 -newermt "-15 min" -type f 2>/dev/null | sed "s|$WS/||" | head -8
 echo "-- son test çıktısı satırları"
 for f in $(ls -t $G/cikti_*.log 2>/dev/null | head -2); do echo "  [$(basename $f)] $(grep -vE '^\s*$|INFO' $f | tail -1 | cut -c1-110)"; done
+echo "-- /dev/shm: $(ls /dev/shm | grep -c fastrtps) fastrtps segmenti, $(df -h /dev/shm | awk 'NR==2{print $5}') dolu"
 echo "-- disk: $(df -h $WS | awk 'NR==2{print $4" boş"}')"

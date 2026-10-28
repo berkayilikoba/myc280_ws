@@ -13,10 +13,20 @@ Algoritma Akışı:
   4. Maskenin ağırlık merkezinden (cx, cy) renk optik çerçevesindeki görüş ışını hesaplanır.
   5. Derinlik görüntüsünde (/camera/depth/image_raw, 848x480) TF veya dış kalibrasyon
      (camera_color_optical_frame -> camera_depth_optical_frame) ile izdüşüm yapılır.
-  6. İzdüşüm noktası çevresindeki 7x7 pencereden geçerli derinliklerin medyanı alınır.
-  7. Derinlik nesnenin ön yüzeyidir; küre merkezi için nesne yarıçapı kadar (nesne_yaricap=0.035 m)
-     ışın boyunca 3B uzayda ilerletilir.
-  8. Nesne merkezinin 3B konumu PointStamped olarak /kavrama/nesne_algi konusuna,
+  6. İki aşamalı derinlik kestirimi ile leke kutusunun iç bölgesinden (kenardan %25 içerideki
+     çekirdek alan) geçerli derinlik pikselleri toplanır ve düşük yüzdelik (derinlik_yuzdelik=30)
+     seçilir. Bu sayede leke kenarına ve arkasındaki zemine taşan derinlik sıçramaları önlenir.
+     Piksel sayısı min_derinlik_piksel (6) altındaysa 7x7 pencere-medyan yedek yoluna dönülür.
+  7. Tutarlılık denetimi: Seçilen derinliğin ±derinlik_bant_m (0.05 m) bandındaki geçerli piksel
+     oranı <%40 ise karışık arka plan kabul edilir ve ölçüm yayınlanmaz.
+  8. Azami menzil denetimi: maks_menzil_m (3.0 m) üzerindeki uzak ölçümler yayınlanmaz.
+  9. Yüzey-Merkez Düzeltmesi Analizi:
+     Derinlik kamerası nesnenin kameraya bakan ön yüzeyini ölçer. Küre merkezi için nesne yarıçapı
+     kadar (nesne_yaricap=0.035 m) ışın boyunca 3B uzayda ilerletme yapılır (isin_derinlik_3b).
+     Öteleme fiziksel olarak doğrudur (ön yüzey derinliği + r = merkez). Simde menzille büyüyen sistematik
+     ileri sapma ölçüldü (0.8 m'de +2.4 cm, 3 m'de +4 cm); KAYNAĞI DOĞRULANMADI (adaylar: sensör modelinin
+     derinlik ölçek hatası, renk-derinlik eşleme, piksel seçimi). Son yaklaşmada (<0.6 m) sapma <1 cm.
+ 10. Nesne merkezinin 3B konumu PointStamped olarak /kavrama/nesne_algi konusuna,
      görüş durumu ise /kavrama/nesne_algi_durum konusuna ('GORUYOR'/'GORMUYOR'/'KISMI') yayınlanır.
      'KISMI' durumu: Lekenin sınırlayıcı kutusu görüntü kenarına kenar_payi_px kadar
      yakınsa ölçüm yayınlanmaz ve kısmi görünüm durumu yayınlanır.
@@ -532,6 +542,239 @@ def derinlik_medyan_al(
     return float(np.median(gecerli))
 
 
+def derinlik_gecerli_pikselleri_ayikla(
+    derinlik_verisi: np.ndarray | Sequence[float],
+    min_gecerli_m: float = 0.05,
+    max_gecerli_m: float = 12.0,
+    maske: np.ndarray | None = None,
+) -> np.ndarray:
+    """Derinlik görüntüsü kırpmasından veya dizisinden geçerli derinlik değerlerini (m) ayıklar.
+
+    Desteklenen formatlar:
+      - 2B veya 1B uint16 (mm) -> metreye çevrilir
+      - 2B veya 1B float32/float64 (m)
+      - 1B float listesi/dizisi
+
+    Args:
+        derinlik_verisi: Derinlik kırpması (2B) veya 1B değer dizisi.
+        min_gecerli_m: Asgari geçerli derinlik eşiği (m).
+        max_gecerli_m: Azami geçerli derinlik eşiği (m).
+        maske: İsteğe bağlı 2B ikili maske (yalnızca maske > 0 pikselleri alınır).
+
+    Returns:
+        1B float64 metre cinsinden geçerli değerler dizisi.
+    """
+    if derinlik_verisi is None:
+        return np.empty(0, dtype=np.float64)
+
+    arr = np.asarray(derinlik_verisi)
+    if arr.size == 0:
+        return np.empty(0, dtype=np.float64)
+
+    if maske is not None and maske.shape == arr.shape:
+        arr = arr[maske > 0]
+        if arr.size == 0:
+            return np.empty(0, dtype=np.float64)
+
+    if arr.dtype == np.uint16:
+        gecerli_mask = (arr > 0) & (arr < 65535)
+        if not np.any(gecerli_mask):
+            return np.empty(0, dtype=np.float64)
+        degerler = arr[gecerli_mask].astype(np.float64) / 1000.0
+    else:
+        arr_f = arr.astype(np.float64)
+        gecerli_mask = np.isfinite(arr_f) & (arr_f > 0.0)
+        if not np.any(gecerli_mask):
+            return np.empty(0, dtype=np.float64)
+        degerler = arr_f[gecerli_mask]
+
+    filtre = (degerler >= float(min_gecerli_m)) & (degerler <= float(max_gecerli_m))
+    return degerler[filtre]
+
+
+def leke_kutusu_ic_sinirlari(
+    u_merkez: float,
+    v_merkez: float,
+    genislik: float,
+    yukseklik: float,
+    kenar_payi_orani: float = 0.25,
+    goruntu_genislik: int | None = None,
+    goruntu_yukseklik: int | None = None,
+) -> tuple[int, int, int, int]:
+    """Leke merkez ve boyutundan kenardan kenar_payi_orani kadar içerideki ROI sınırlarını hesaplar.
+
+    Kenardan %25 içeri girildiğinde (kenar_payi_orani=0.25), kutunun orta %50'lik çekirdek
+    bölgesi seçilir. Bu, nesne siluet kenarındaki zemin/arka plan sızıntılarını önler.
+
+    Args:
+        u_merkez: Leke merkezinin sütun koordinatı (x).
+        v_merkez: Leke merkezinin satır koordinatı (y).
+        genislik: Leke sınırlayıcı kutusunun genişliği (px).
+        yukseklik: Leke sınırlayıcı kutusunun yüksekliği (px).
+        kenar_payi_orani: Dış kenarlardan içeri girilecek oran (varsayılan 0.25, yani %25).
+        goruntu_genislik: Görüntü genişlik sınırı (isteğe bağlı kırpma).
+        goruntu_yukseklik: Görüntü yükseklik sınırı (isteğe bağlı kırpma).
+
+    Returns:
+        (u_min, u_max, v_min, v_max): Dilimleme sınırları.
+    """
+    pay = max(0.0, min(0.45, float(kenar_payi_orani)))
+    w_ic = max(1.0, float(genislik) * (1.0 - 2.0 * pay))
+    h_ic = max(1.0, float(yukseklik) * (1.0 - 2.0 * pay))
+
+    u_min = int(round(float(u_merkez) - w_ic / 2.0))
+    u_max = int(round(float(u_merkez) + w_ic / 2.0))
+    v_min = int(round(float(v_merkez) - h_ic / 2.0))
+    v_max = int(round(float(v_merkez) + h_ic / 2.0))
+
+    if goruntu_genislik is not None:
+        u_min = max(0, min(int(goruntu_genislik), u_min))
+        u_max = max(0, min(int(goruntu_genislik), u_max))
+    if goruntu_yukseklik is not None:
+        v_min = max(0, min(int(goruntu_yukseklik), v_min))
+        v_max = max(0, min(int(goruntu_yukseklik), v_max))
+
+    return (u_min, u_max, v_min, v_max)
+
+
+def derinlik_yuzdelik_al(
+    derinlikler: Sequence[float] | np.ndarray,
+    yuzdelik: float = 30.0,
+) -> float | None:
+    """Geçerli derinlik değerleri dizisinden düşük yüzdeliği (vars. 30. yüzdelik) seçer.
+
+    Medyan yerine düşük yüzdelik kullanılması, nesnenin ön yüzeyini temsil eden en yakın
+    sağlam değerlerin seçilmesini sağlar ve arka plan/zemin sıçramalarını önler.
+
+    Args:
+        derinlikler: 1B geçerli derinlik değerleri (metre).
+        yuzdelik: Seçilecek yüzdelik (0-100 arası, varsayılan 30).
+
+    Returns:
+        Seçilen derinlik (m) veya dizi boşsa None.
+    """
+    if derinlikler is None:
+        return None
+    arr = np.asarray(derinlikler, dtype=np.float64)
+    if arr.size == 0:
+        return None
+    arr = arr[np.isfinite(arr) & (arr > 0.0)]
+    if arr.size == 0:
+        return None
+    q = max(0.0, min(100.0, float(yuzdelik)))
+    return float(np.percentile(arr, q))
+
+
+def derinlik_tutarlilik_orani(
+    derinlikler: Sequence[float] | np.ndarray,
+    secilen_derinlik: float,
+    derinlik_bant_m: float = 0.05,
+) -> float:
+    """Seçilen derinliğin ±derinlik_bant_m civarındaki piksel oranını hesaplar."""
+    if derinlikler is None or secilen_derinlik is None:
+        return 0.0
+    arr = np.asarray(derinlikler, dtype=np.float64)
+    if arr.size == 0:
+        return 0.0
+    arr = arr[np.isfinite(arr) & (arr > 0.0)]
+    if arr.size == 0:
+        return 0.0
+    fark = np.abs(arr - float(secilen_derinlik))
+    sayi = np.count_nonzero(fark <= float(derinlik_bant_m))
+    return float(sayi / arr.size)
+
+
+def derinlik_tutarlilik_uygun_mu(
+    derinlikler: Sequence[float] | np.ndarray,
+    secilen_derinlik: float,
+    derinlik_bant_m: float = 0.05,
+    min_oran: float = 0.40,
+) -> bool:
+    """Seçilen derinliğin ±derinlik_bant_m civarındaki piksel oranının >= min_oran olup olmadığını denetler."""
+    oran = derinlik_tutarlilik_orani(derinlikler, secilen_derinlik, derinlik_bant_m=derinlik_bant_m)
+    return bool(oran >= float(min_oran))
+
+
+def menzil_uygun_mu(
+    derinlik_m: float | None,
+    maks_menzil_m: float = 3.0,
+    min_menzil_m: float = 0.05,
+) -> bool:
+    """Ölçülen derinliğin geçerli menzil [min_menzil_m, maks_menzil_m] içinde olup olmadığını denetler."""
+    if derinlik_m is None or not math.isfinite(derinlik_m):
+        return False
+    d = float(derinlik_m)
+    return float(min_menzil_m) <= d <= float(maks_menzil_m)
+
+
+def derinlik_saglam_hesapla(
+    derinlikler: Sequence[float] | np.ndarray,
+    yedek_derinlik: float | None = None,
+    derinlik_yuzdelik: float = 30.0,
+    min_derinlik_piksel: int = 6,
+    derinlik_bant_m: float = 0.05,
+    min_tutarlilik_orani: float = 0.40,
+    maks_menzil_m: float = 3.0,
+    durum_ver: bool = False,
+) -> float | tuple[float | None, str] | None:
+    """Leke piksellerinden sağlam derinlik kestirimi, tutarlılık ve menzil denetimini yürütür.
+
+    İşlem Adımları:
+      1. Piksel sayısı < min_derinlik_piksel ise yedek yola (pencere medyanı) döner.
+      2. Yeterli piksel varsa derinlik_yuzdelik (vars. 30) ile düşük yüzdeliği seçer.
+      3. Tutarlılık denetimi: Seçilen derinlik etrafındaki ±derinlik_bant_m içindeki piksel
+         oranı < min_tutarlilik_orani (%40) ise karışık arka plan reddi uygulanır (None).
+      4. Azami menzil denetimi: d > maks_menzil_m ise ölçüm reddedilir (None).
+
+    Args:
+        derinlikler: Leke maskesi/iç bölgesinden toplanan derinlik değerleri.
+        yedek_derinlik: Yetersiz piksel durumunda kullanılacak yedek derinlik (pencere medyanı).
+        derinlik_yuzdelik: Düşük yüzdelik parametresi (varsayılan 30).
+        min_derinlik_piksel: Asgari leke içi derinlik piksel sayısı (varsayılan 6).
+        derinlik_bant_m: Tutarlılık bandı toleransı (metre, varsayılan 0.05 m).
+        min_tutarlilik_orani: Asgari bant içi piksel oranı (varsayılan 0.40, yani %40).
+        maks_menzil_m: Azami yayınlama menzili (metre, varsayılan 3.0 m).
+        durum_ver: True ise (derinlik, durum_kodu), False ise derinlik döner.
+
+    Returns:
+        durum_ver False ise float derinlik veya None,
+        durum_ver True ise (derinlik, durum_kodu) demeti döner.
+        Durum kodları: 'GECERLI', 'YEDEK_YOL', 'AZ_PIKSEL', 'TUTARSIZ_ARKA_PLAN',
+                       'MAKS_MENZIL_ASILDI', 'GECERSIZ_PIKSEL'.
+    """
+    arr = np.empty(0, dtype=np.float64)
+    if derinlikler is not None:
+        arr_raw = np.asarray(derinlikler, dtype=np.float64)
+        if arr_raw.size > 0:
+            arr = arr_raw[np.isfinite(arr_raw) & (arr_raw > 0.0)]
+
+    # 1. Asgari piksel sayısı denetimi ve yedek yol
+    if arr.size < int(min_derinlik_piksel):
+        if yedek_derinlik is not None and math.isfinite(yedek_derinlik) and yedek_derinlik > 0.0:
+            d_yedek = float(yedek_derinlik)
+            if not menzil_uygun_mu(d_yedek, maks_menzil_m=maks_menzil_m):
+                return (None, 'MAKS_MENZIL_ASILDI') if durum_ver else None
+            return (d_yedek, 'YEDEK_YOL') if durum_ver else d_yedek
+        return (None, 'AZ_PIKSEL') if durum_ver else None
+
+    # 2. Düşük yüzdelik seçimi
+    d_secilen = derinlik_yuzdelik_al(arr, yuzdelik=derinlik_yuzdelik)
+    if d_secilen is None:
+        return (None, 'GECERSIZ_PIKSEL') if durum_ver else None
+
+    # 3. Tutarlılık denetimi (karışık arka plan reddi)
+    if not derinlik_tutarlilik_uygun_mu(
+        arr, d_secilen, derinlik_bant_m=derinlik_bant_m, min_oran=min_tutarlilik_orani
+    ):
+        return (None, 'TUTARSIZ_ARKA_PLAN') if durum_ver else None
+
+    # 4. Azami menzil denetimi
+    if not menzil_uygun_mu(d_secilen, maks_menzil_m=maks_menzil_m):
+        return (None, 'MAKS_MENZIL_ASILDI') if durum_ver else None
+
+    return (d_secilen, 'GECERLI') if durum_ver else d_secilen
+
+
 # ==============================================================================
 # 2. Yardımcı Dönüşümler (Görüntü ve TF)
 # ==============================================================================
@@ -678,6 +921,12 @@ class RenkAlgiDugumu(Node):
         p('beklenen_yaricap_m', 0.035)
         p('boyut_denetimi', True)
 
+        # N20: Derinlik leke maskesi, yüzdelik, tutarlılık ve azami menzil parametreleri
+        p('derinlik_yuzdelik', 30)
+        p('min_derinlik_piksel', 6)
+        p('derinlik_bant_m', 0.05)
+        p('maks_menzil_m', 3.0)
+
         p('renk_topic', '/camera/color/image_raw')
         p('renk_info_topic', '/camera/color/camera_info')
         p('derinlik_topic', '/camera/depth/image_raw')
@@ -693,6 +942,11 @@ class RenkAlgiDugumu(Node):
         self.goruyor: bool = False
         self.durum: str = 'GORMUYOR'
         self.son_islem_zamani = self.get_clock().now()
+
+        # Teşhis ve hata ayıklama sayaçları (N20)
+        self.sayac_yedek_derinlik: int = 0
+        self.sayac_tutarsiz_derinlik: int = 0
+        self.sayac_asiri_menzil: int = 0
 
         # TF2 Dinleyicisi
         self.tf_buffer = Buffer()
@@ -809,6 +1063,10 @@ class RenkAlgiDugumu(Node):
         kenar_payi_px = int(self.get_parameter('kenar_payi_px').value)
         beklenen_yaricap_m = float(self.get_parameter('beklenen_yaricap_m').value)
         boyut_denetimi = bool(self.get_parameter('boyut_denetimi').value)
+        derinlik_yuzdelik = float(self.get_parameter('derinlik_yuzdelik').value)
+        min_derinlik_piksel = int(self.get_parameter('min_derinlik_piksel').value)
+        derinlik_bant_m = float(self.get_parameter('derinlik_bant_m').value)
+        maks_menzil_m = float(self.get_parameter('maks_menzil_m').value)
 
         # 1. Renk maskesi, en büyük bileşen ve sınırlayıcı kutu
         mask, alan, kutu = maske_bul(
@@ -873,44 +1131,110 @@ class RenkAlgiDugumu(Node):
         # TF / dış kalibrasyon dönüşümü
         t_renk_derinlik = self._tf_renk_derinlik_al()
 
-        # 3. İki aşamalı derinlik izdüşümü ve medyan alma
+        # 3. İki aşamalı derinlik izdüşümü ve leke maskesi/iç bölgesinden sağlam derinlik kestirimi
+        fx_c, fy_c, _, _ = k_ayristir(k_renk)
+        fx_d, fy_d, _, _ = k_ayristir(k_derinlik)
+        w_d = float(kutu[2]) * (fx_d / fx_c)
+        h_d = float(kutu[3]) * (fy_d / fy_c)
+        H_d, W_d = derinlik_img.shape[:2]
+
         # İlk aşama: 0.6 m nominal mesafe varsayımıyla ilk piksel kestirimi
         ud_ilk, vd_ilk = renk_derinlik_esle(
             cx, cy, 0.6, k_renk, k_derinlik, t_renk_derinlik=t_renk_derinlik
         )
-        d_medyan = derinlik_medyan_al(
+        u_min1, u_max1, v_min1, v_max1 = leke_kutusu_ic_sinirlari(
+            ud_ilk, vd_ilk, w_d, h_d, kenar_payi_orani=0.25,
+            goruntu_genislik=W_d, goruntu_yukseklik=H_d,
+        )
+        pikseller_ilk = derinlik_gecerli_pikselleri_ayikla(derinlik_img[v_min1:v_max1, u_min1:u_max1])
+        d_yedek_ilk = derinlik_medyan_al(
             derinlik_img, ud_ilk, vd_ilk, pencere_boyut=pencere_boyut
         )
 
-        # İkinci aşama: Gerçek ölçülen derinlikle hassas piksel eşlemesi ve medyan yenileme
-        if d_medyan is not None and d_medyan > 0.05:
+        if pikseller_ilk.size >= min_derinlik_piksel:
+            d_tahmin = derinlik_yuzdelik_al(pikseller_ilk, yuzdelik=derinlik_yuzdelik)
+        else:
+            d_tahmin = d_yedek_ilk
+
+        # İkinci aşama: Gerçek ölçülen derinlikle hassas piksel eşlemesi ve derinlik yenileme
+        pikseller_son = pikseller_ilk
+        d_yedek_son = d_yedek_ilk
+
+        if d_tahmin is not None and d_tahmin > 0.05:
             ud_son, vd_son = renk_derinlik_esle(
-                cx, cy, d_medyan, k_renk, k_derinlik, t_renk_derinlik=t_renk_derinlik
+                cx, cy, d_tahmin, k_renk, k_derinlik, t_renk_derinlik=t_renk_derinlik
             )
-            d_rafine = derinlik_medyan_al(
+            u_min2, u_max2, v_min2, v_max2 = leke_kutusu_ic_sinirlari(
+                ud_son, vd_son, w_d, h_d, kenar_payi_orani=0.25,
+                goruntu_genislik=W_d, goruntu_yukseklik=H_d,
+            )
+            pikseller_rafine = derinlik_gecerli_pikselleri_ayikla(derinlik_img[v_min2:v_max2, u_min2:u_max2])
+            d_yedek_rafine = derinlik_medyan_al(
                 derinlik_img, ud_son, vd_son, pencere_boyut=pencere_boyut
             )
-            if d_rafine is not None:
-                d_medyan = d_rafine
+            if pikseller_rafine.size >= min_derinlik_piksel or d_yedek_rafine is not None:
+                pikseller_son = pikseller_rafine
+                d_yedek_son = d_yedek_rafine
 
-        if d_medyan is None or d_medyan <= 0.05:
+        # Sağlam derinlik kestirimi (yüzdelik, piksel sayısı, tutarlılık ve azami menzil denetimi)
+        d_sonuc = derinlik_saglam_hesapla(
+            pikseller_son,
+            yedek_derinlik=d_yedek_son,
+            derinlik_yuzdelik=derinlik_yuzdelik,
+            min_derinlik_piksel=min_derinlik_piksel,
+            derinlik_bant_m=derinlik_bant_m,
+            min_tutarlilik_orani=0.40,
+            maks_menzil_m=maks_menzil_m,
+            durum_ver=True,
+        )
+        d_secilen, durum_neden = d_sonuc  # type: ignore[misc]
+
+        if durum_neden == 'YEDEK_YOL':
+            self.sayac_yedek_derinlik += 1
+            self.get_logger().debug(
+                f'Leke derinlik pikseli yetersiz ({pikseller_son.size} < {min_derinlik_piksel}), '
+                f'yedek pencere medyanina donuldu: {d_secilen:.3f}m'
+            )
+        elif durum_neden == 'TUTARSIZ_ARKA_PLAN':
+            self.sayac_tutarsiz_derinlik += 1
+            self.get_logger().debug(
+                f'Derinlik tutarsiz (karisik arka plan reddi): '
+                f'piksel_sayisi={pikseller_son.size}, bant=±{derinlik_bant_m:.2f}m'
+            )
+            self.goruyor = False
+            self.durum = 'GORMUYOR'
+            if hata_ayiklama:
+                self._hata_ayiklama_yayinla(bgr, mask, (cx, cy), None, renk_msg.header)
+            return
+        elif durum_neden == 'MAKS_MENZIL_ASILDI':
+            self.sayac_asiri_menzil += 1
+            self.get_logger().debug(
+                f'Derinlik azami menzili asti (maks={maks_menzil_m:.2f}m)'
+            )
             self.goruyor = False
             self.durum = 'GORMUYOR'
             if hata_ayiklama:
                 self._hata_ayiklama_yayinla(bgr, mask, (cx, cy), None, renk_msg.header)
             return
 
-        # Boyut denetimi: derinlik penceresi medyanı ile leke boyutunun tutarlılığı
+        if d_secilen is None or d_secilen <= 0.05:
+            self.goruyor = False
+            self.durum = 'GORMUYOR'
+            if hata_ayiklama:
+                self._hata_ayiklama_yayinla(bgr, mask, (cx, cy), None, renk_msg.header)
+            return
+
+        # Boyut denetimi: derinlik ile leke boyutunun tutarlılığı
         # (görünen yarıçap_px · derinlik / fx ile kestirilen fiziksel yarıçap, beklenen ±%60 dışında ise reddet)
         if boyut_denetimi:
             fx, _, _, _ = k_ayristir(k_renk)
             r_px = gorunen_yaricap_px_hesapla(alan, kutu)
             if not boyut_uygun_mu(
-                r_px, d_medyan, fx, beklenen_yaricap_m=beklenen_yaricap_m, tolerans_orani=0.60
+                r_px, d_secilen, fx, beklenen_yaricap_m=beklenen_yaricap_m, tolerans_orani=0.60
             ):
                 self.get_logger().debug(
-                    f'Boyut tutarsiz: r_px={r_px:.1f}, d={d_medyan:.3f}m, '
-                    f'r_kestirilen={(r_px * d_medyan / fx):.4f}m, beklenen={beklenen_yaricap_m:.4f}m'
+                    f'Boyut tutarsiz: r_px={r_px:.1f}, d={d_secilen:.3f}m, '
+                    f'r_kestirilen={(r_px * d_secilen / fx):.4f}m, beklenen={beklenen_yaricap_m:.4f}m'
                 )
                 self.goruyor = False
                 self.durum = 'GORMUYOR'
@@ -921,7 +1245,7 @@ class RenkAlgiDugumu(Node):
         # 4. Renk ışını ve 3B konum kestirimi (kamera renk optik çerçevesinde)
         isin = piksel_isin(cx, cy, k_renk, birim=True)
         x_3b, y_3b, z_3b = isin_derinlik_3b(
-            isin, d_medyan, nesne_yaricap=nesne_yaricap, oklid_mi=False
+            isin, d_secilen, nesne_yaricap=nesne_yaricap, oklid_mi=False
         )
 
         # 5. PointStamped yayını
