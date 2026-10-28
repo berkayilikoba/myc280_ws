@@ -1,7 +1,13 @@
 """LIMO kavrama ve görev katmanı launch dosyası.
 
 Kullanım örnekleri:
-  Simülasyon (Gazebo) için:
+  Simülasyonda sahte algı ile:
+    ros2 launch limo_autonomy kavrama.launch.py use_sim_time:=true algi:=sahte
+
+  Simülasyonda gerçek renk algısı (renk_algi) ile:
+    ros2 launch limo_autonomy kavrama.launch.py use_sim_time:=true algi:=renk hata_ayiklama:=true
+
+  Geriye dönük uyumluluk (sahte_algi:=true):
     ros2 launch limo_autonomy kavrama.launch.py use_sim_time:=true sahte_algi:=true
 
   Görev isteği:
@@ -14,14 +20,14 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description() -> LaunchDescription:
-    """Kavrama, görev yöneticisi ve isteğe bağlı sahte algı düğümlerini başlatır."""
+    """Kavrama, görev yöneticisi ve algı düğümlerini (sahte veya renk_algi) başlatır."""
     try:
         default_harita = os.path.join(
             get_package_share_directory('limo_bringup'),
@@ -68,10 +74,23 @@ def generate_launch_description() -> LaunchDescription:
         description='Gerçek robot kolu servisi yoksa sahte kol başarılı kabul edilir.',
     )
 
+    algi_arg = DeclareLaunchArgument(
+        'algi',
+        default_value='sahte',
+        choices=['sahte', 'renk', 'yok'],
+        description='Algı kaynağı: sahte (sahte_algi düğümü) | renk (renk_algi düğümü) | yok.',
+    )
+
     sahte_algi_arg = DeclareLaunchArgument(
         'sahte_algi',
+        default_value='',
+        description='Geriye dönük uyumluluk için: sahte_algi:=true sahte algıyı etkinleştirir.',
+    )
+
+    hata_ayiklama_arg = DeclareLaunchArgument(
+        'hata_ayiklama',
         default_value='false',
-        description='Simülasyonda sahte algı düğümünü çalıştır.',
+        description='Renk algı düğümü için hata ayıklama görüntüsü yayınla (/kavrama/algi_goruntu).',
     )
 
     nesne_x_arg = DeclareLaunchArgument(
@@ -91,6 +110,22 @@ def generate_launch_description() -> LaunchDescription:
         default_value='0.10',
         description='Sahte algı için nesnenin dünya (map) z koordinatı (m).',
     )
+
+    # İkisi aynı anda çalışmasın:
+    # algi:=renk açıkça seçilmişse renk_algi çalışır.
+    # sahte_algi:=true veya (algi:=sahte ve sahte_algi!=false) iken sahte_algi çalışır.
+    sahte_kosul = PythonExpression([
+        "'", LaunchConfiguration('algi'), "' != 'renk' and '",
+        LaunchConfiguration('algi'), "' != 'yok' and ('",
+        LaunchConfiguration('sahte_algi'), "'.lower() in ('true', '1') or ('",
+        LaunchConfiguration('algi'), "' == 'sahte' and '",
+        LaunchConfiguration('sahte_algi'), "'.lower() not in ('false', '0')))"
+    ])
+
+    renk_kosul = PythonExpression([
+        "'", LaunchConfiguration('algi'), "' == 'renk' and '",
+        LaunchConfiguration('sahte_algi'), "'.lower() not in ('true', '1')"
+    ])
 
     kavrama_node = Node(
         package='limo_autonomy',
@@ -121,12 +156,25 @@ def generate_launch_description() -> LaunchDescription:
         executable='sahte_algi',
         name='sahte_algi',
         output='screen',
-        condition=IfCondition(LaunchConfiguration('sahte_algi')),
+        condition=IfCondition(sahte_kosul),
         parameters=[{
             'use_sim_time': LaunchConfiguration('use_sim_time'),
             'nesne_x': ParameterValue(LaunchConfiguration('nesne_x'), value_type=float),
             'nesne_y': ParameterValue(LaunchConfiguration('nesne_y'), value_type=float),
             'nesne_z': ParameterValue(LaunchConfiguration('nesne_z'), value_type=float),
+        }],
+    )
+
+    renk_algi_node = Node(
+        package='limo_autonomy',
+        executable='renk_algi',
+        name='renk_algi',
+        output='screen',
+        condition=IfCondition(renk_kosul),
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'hz': 5.0,
+            'hata_ayiklama': ParameterValue(LaunchConfiguration('hata_ayiklama'), value_type=bool),
         }],
     )
 
@@ -158,19 +206,22 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     return LaunchDescription([
+        algi_arg,
+        sahte_algi_arg,
+        hata_ayiklama_arg,
         gorsel_arg,
         rviz_arg,
         use_sim_time_arg,
         harita_arg,
         nesneler_arg,
         kol_sahte_arg,
-        sahte_algi_arg,
         nesne_x_arg,
         nesne_y_arg,
         nesne_z_arg,
         kavrama_node,
         gorev_node,
         sahte_algi_node,
+        renk_algi_node,
         gorsel_node,
         rviz_node,
     ])

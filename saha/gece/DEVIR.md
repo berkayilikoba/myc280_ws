@@ -35,3 +35,13 @@ Bitince: `ajan rapor <etiket>` → diff oku → testleri KENDİN çalıştır �
 - Robot şarjda, HAREKET ETTİRME (gerçek robot işleri yok).
 - Sim temizliği: iş bitince gzserver/joint_state_publisher kalmasın (`ps -eo args | awk '$1=="gzserver"'`).
 - agy görev bitişi: yalnız `ajan bekle` (arka planda). Günlük boyutuna bakma.
+
+## Gece sonuçları (28.10, ~10:15) — ölçülmüş
+- Görev g6 (N15 sonrası): /kavra 0.9 cm SUCCEEDED; "elma" görevi TAMAM, `NAV_Q erken_kabul (18.4 cm, 4.2°)` tetiklendi.
+- Saf odom (`localization:=yok`, map->odom statik): teker 7/7, 124 s, ort. varış 0.20 m, min açıklık 0.17.
+  vio_kotu 6/7: bati_dar (0.27 m) TIMEOUT, kurtarma 18, min açıklık 0.0 (temas), lok. hatası 0.31–0.44 m.
+  → VO ekibine gereksinim: dar geçitlerde kümülatif kayma < ~0.15 m, ya da map->odom düzeltmesi (yer tutucu AMCL ile vio_kotu 7/7).
+- Dinamik engel F6 sonrası karşıdan: SUCCEEDED, temas −2.9 cm, robot temasta 0.094 m/s (robot_carpti sınıfı).
+  Tepkisiz insan 0.6 m/s ile kafa kafaya geliyor; robot yavaşlıyor ama tam durmuyor. DurBolge önünü büyütmek kavrama
+  yaklaşmasını (nesne gövdeye 6 cm) bozar → ayrı ele alınmalı (kavrama sırasında bölge değiştirme ya da hıza bağlı bölge).
+- ilk_poz.py: duvar saati damgası sim saatinde "gelecek" sayılıp AMCL tarafından reddediliyordu → stamp 0 (düzeltildi).

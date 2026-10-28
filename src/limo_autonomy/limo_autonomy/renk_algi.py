@@ -30,6 +30,7 @@ import numpy as np
 from geometry_msgs.msg import PointStamped
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Header, String
 from tf2_ros import Buffer, TransformListener
@@ -411,17 +412,41 @@ def goruntu_mesajindan_numpy(msg: Image) -> np.ndarray:
     h, w = msg.height, msg.width
 
     if enc in ('bgr8', 'rgb8'):
-        arr = np.frombuffer(msg.data, dtype=np.uint8).reshape((h, w, 3))
+        arr = np.frombuffer(msg.data, dtype=np.uint8)
+        if arr.size == h * w * 3:
+            arr = arr.reshape((h, w, 3))
+        elif msg.step > 0 and arr.size >= h * msg.step:
+            arr = arr.reshape((h, msg.step))[:, :w * 3].reshape((h, w, 3))
+        else:
+            arr = arr[:h * w * 3].reshape((h, w, 3))
         if enc == 'rgb8':
             # Standart OpenCV BGR formatına çevir
             arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
         return arr
     elif enc == 'mono8':
-        return np.frombuffer(msg.data, dtype=np.uint8).reshape((h, w))
+        arr = np.frombuffer(msg.data, dtype=np.uint8)
+        if arr.size == h * w:
+            return arr.reshape((h, w))
+        elif msg.step > 0 and arr.size >= h * msg.step:
+            return arr.reshape((h, msg.step))[:, :w]
+        else:
+            return arr[:h * w].reshape((h, w))
     elif enc in ('16uc1', 'mono16'):
-        return np.frombuffer(msg.data, dtype=np.uint16).reshape((h, w))
+        arr = np.frombuffer(msg.data, dtype=np.uint16)
+        if arr.size == h * w:
+            return arr.reshape((h, w))
+        elif msg.step > 0 and arr.size >= h * (msg.step // 2):
+            return arr.reshape((h, msg.step // 2))[:, :w]
+        else:
+            return arr[:h * w].reshape((h, w))
     elif enc == '32fc1':
-        return np.frombuffer(msg.data, dtype=np.float32).reshape((h, w))
+        arr = np.frombuffer(msg.data, dtype=np.float32)
+        if arr.size == h * w:
+            return arr.reshape((h, w))
+        elif msg.step > 0 and arr.size >= h * (msg.step // 4):
+            return arr.reshape((h, msg.step // 4))[:, :w]
+        else:
+            return arr[:h * w].reshape((h, w))
     else:
         # Bilinmeyen formatlarda bayt verisini uint8 olarak dene
         return np.frombuffer(msg.data, dtype=np.uint8).reshape((h, w, -1))
@@ -553,16 +578,16 @@ class RenkAlgiDugumu(Node):
         derinlik_info_topic = str(self.get_parameter('derinlik_info_topic').value)
 
         self.sub_renk_info = self.create_subscription(
-            CameraInfo, renk_info_topic, self._renk_info_cb, 10
+            CameraInfo, renk_info_topic, self._renk_info_cb, qos_profile_sensor_data
         )
         self.sub_derinlik_info = self.create_subscription(
-            CameraInfo, derinlik_info_topic, self._derinlik_info_cb, 10
+            CameraInfo, derinlik_info_topic, self._derinlik_info_cb, qos_profile_sensor_data
         )
         self.sub_derinlik = self.create_subscription(
-            Image, derinlik_topic, self._derinlik_cb, 10
+            Image, derinlik_topic, self._derinlik_cb, qos_profile_sensor_data
         )
         self.sub_renk = self.create_subscription(
-            Image, renk_topic, self._renk_cb, 10
+            Image, renk_topic, self._renk_cb, qos_profile_sensor_data
         )
 
         # Durum yayınlama döngüsü (1 Hz, sahte_algi arayüzü ile birebir uyumlu)
@@ -621,7 +646,7 @@ class RenkAlgiDugumu(Node):
         dt = (simdi - self.son_islem_zamani).nanoseconds / 1e9
         asgari_aralik = 1.0 / max(1e-3, hz)
 
-        if dt < (asgari_aralik - 1e-4):
+        if 0.0 <= dt < (asgari_aralik - 1e-4):
             return
 
         self.son_islem_zamani = simdi

@@ -16,5 +16,6 @@ m.pose.pose.position.x, m.pose.pose.position.y = x, y
 m.pose.pose.orientation.z, m.pose.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
 m.pose.covariance[0] = m.pose.covariance[7] = 0.0025; m.pose.covariance[35] = 0.003
 for _ in range(3):
-    m.header.stamp = n.get_clock().now().to_msg(); p.publish(m); rclpy.spin_once(n, timeout_sec=1.0)
+    # stamp 0: AMCL en son TF'i kullanır (duvar saati sim saatinde 'gelecek' sayılıp reddediliyordu)
+    p.publish(m); rclpy.spin_once(n, timeout_sec=1.0)
 print(f'ilk_poz: verildi ({x}, {y}, {yaw}) — abone {p.get_subscription_count()}')
