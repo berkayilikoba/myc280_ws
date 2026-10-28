@@ -38,6 +38,9 @@ class SonYaklasmaAyar:
     son_donus_mesafe: float = 0.03      # bu mesafe içinde son yaklaşma bandı (m)
     olcum_zaman_asimi: float = 1.0      # ölçüm gelmezse zaman aşımı (s)
     sapma_esik: float = 0.15     # tahmin edilen hedefin ani sıçrama eşiği (m)
+    aykiri_kabul_sayisi: int = 3 # nesne tahmini ardışık aykırı kabul sayısı eşiği
+    sapma_iptal_mesafe: float = 0.30    # bu mesafenin üzerinde tahmin sıçramasında iptal yerine yeniden hedeflenir (m)
+    maks_yeniden_hedef: int = 2         # izin verilen azami yeniden hedefleme sayısı
     geri_izin: bool = True       # hedef arkada kalırsa kısa geri manevraya izin ver
     max_sure: float = 40.0       # görev için azami süre (s)
 
@@ -53,7 +56,11 @@ class SonYaklasmaAyar:
     # Görüş koruma parametreleri
     gorus_yari_aci: float = math.radians(35.0)  # kamera yatay görüş yarı açısı (rad, varsayılan 35°)
     gorus_payi: float = math.radians(10.0)      # görüş koruma emniyet payı (rad, varsayılan 10°)
-    olcumsuz_mesafe: float = 0.25               # bu mesafenin altında ölçüm kesilse de odomla devam et (m)
+    olcumsuz_mesafe: float = 0.25               # bu mesafenin altında nesne tahmini dondurulur (m)
+    # Ölçüm kaybının tolere edildiği mesafe (m): D435 zemindeki küçük nesneyi robot merkezine ~0.53 m'den yakında
+    # görüntünün alt kenarında kaybediyor (sim, elma r=0.035) → P'ye rho≈0.31 m. Bu mesafenin altında ölçüm
+    # kesilirse son tahminle odomla devam edilir (kayma %1-2 → <1 cm).
+    kayip_tolerans_mesafe: float = 0.40
 
     def __post_init__(self) -> None:
         """Astolfi kutupsal denetleyici kazançlarının asimptotik kararlılık koşullarını doğrular."""
@@ -118,9 +125,15 @@ def nesne_robotta_son(
 class NesneTahmini:
     """Odom çerçevesinde nesne konumunun üstel ortalamayla takibi ve aykırı ölçüm filtrelemesi."""
 
-    def __init__(self, alfa: float = 0.4, esik_aykiri: float = 0.10) -> None:
+    def __init__(
+        self,
+        alfa: float = 0.4,
+        esik_aykiri: float = 0.10,
+        aykiri_kabul_sayisi: int = 3,
+    ) -> None:
         self.alfa = alfa
         self.esik_aykiri = esik_aykiri
+        self.aykiri_kabul_sayisi = int(aykiri_kabul_sayisi)
         self.x: float | None = None
         self.y: float | None = None
         self.son_zaman: float | None = None
@@ -129,8 +142,8 @@ class NesneTahmini:
     def guncelle(self, olcum_xy_odom: tuple[float, float], t: float) -> bool:
         """Yeni bir odom çerçeveli ölçümle tahmini günceller.
 
-        İlk ölçüm doğrudan atanır. >0.10 m sıçrayan aykırı ölçümler 3 ardışık
-        gelmedikçe reddedilir.
+        İlk ölçüm doğrudan atanır. >0.10 m sıçrayan aykırı ölçümler
+        aykiri_kabul_sayisi ardışık gelmedikçe reddedilir.
         """
         mx, my = float(olcum_xy_odom[0]), float(olcum_xy_odom[1])
         if self.x is None or self.y is None:
@@ -143,7 +156,7 @@ class NesneTahmini:
         fark = math.hypot(mx - self.x, my - self.y)
         if fark > self.esik_aykiri:
             self.aykiri_sayac += 1
-            if self.aykiri_sayac >= 3:
+            if self.aykiri_sayac >= self.aykiri_kabul_sayisi:
                 self.x = mx
                 self.y = my
                 self.son_zaman = t
@@ -184,7 +197,13 @@ class SonYaklasma:
     ) -> None:
         self.ayar = ayar if ayar is not None else SonYaklasmaAyar()
         self.yaklasma_yaw_odom = yaklasma_yaw_odom
-        self.nesne_tahmin = NesneTahmini(alfa=0.4, esik_aykiri=0.10)
+        self._yaw_disaridan_verildi: bool = yaklasma_yaw_odom is not None
+        self.yeniden_hedef_sayisi: int = 0
+        self.nesne_tahmin = NesneTahmini(
+            alfa=0.4,
+            esik_aykiri=0.10,
+            aykiri_kabul_sayisi=self.ayar.aykiri_kabul_sayisi,
+        )
 
         self.t_baslangic: float | None = None
         self.onceki_t: float | None = None
@@ -193,6 +212,12 @@ class SonYaklasma:
         self._son_bantta: bool = False
         self._son_uyari: str | None = None
         self._tamamlandi: bool = False
+        self._tahmin_donduruldu: bool = False
+
+    @property
+    def tahmin_donduruldu(self) -> bool:
+        """Nesne tahmininin kör nokta nedeniyle dondurulup dondurulmadığı."""
+        return self._tahmin_donduruldu
 
     def adim(
         self,
@@ -218,6 +243,7 @@ class SonYaklasma:
 
         dt = (t - self.onceki_t) if self.onceki_t is not None else 0.0
         self.onceki_t = t
+        uyari: str | None = self._son_uyari
 
         # Güvenlik engeli kontrolü
         if guvenlik_mesafe is not None and guvenlik_mesafe < 0.05:
@@ -229,8 +255,16 @@ class SonYaklasma:
             self.onceki_v = 0.0
             return (0.0, 0.0, 'HATA:max_sure', self._bos_bilgi(robot_odom_pose, t))
 
-        # Yeni ölçüm geldiyse nesne tahminini güncelle
-        if olcum_robot_xy is not None:
+        # robot->hedef mesafesi rho olcumsuz_mesafe altına indiğinde tahmin dondurulur
+        if self.nesne_tahmin.konum is not None and self.yaklasma_yaw_odom is not None:
+            ox_t, oy_t = self.nesne_tahmin.konum
+            hedef_t = hedef_pozu((ox_t, oy_t), self.yaklasma_yaw_odom, self.ayar)
+            rho_t = math.hypot(hedef_t[0] - rx, hedef_t[1] - ry)
+            if rho_t < self.ayar.olcumsuz_mesafe:
+                self._tahmin_donduruldu = True
+
+        # Yeni ölçüm geldiyse ve tahmin dondurulmamışsa nesne tahminini güncelle
+        if olcum_robot_xy is not None and not self._tahmin_donduruldu:
             olcum_odom = nesne_robottan_odoma(olcum_robot_xy, (rx, ry, ryaw))
             onceki_konum = self.nesne_tahmin.konum
             kabul = self.nesne_tahmin.guncelle(olcum_odom, t)
@@ -240,13 +274,44 @@ class SonYaklasma:
                     self.nesne_tahmin.y - onceki_konum[1],  # type: ignore[operator]
                 )
                 if sicrama > self.ayar.sapma_esik:
-                    self.onceki_v = 0.0
-                    return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
+                    # Sıçrama anında robot->hedef mesafesi rho
+                    if self.onceki_hedef is not None:
+                        rho_sicrama = math.hypot(self.onceki_hedef[0] - rx, self.onceki_hedef[1] - ry)
+                    elif self.yaklasma_yaw_odom is not None:
+                        hedef_eski = hedef_pozu(onceki_konum, self.yaklasma_yaw_odom, self.ayar)
+                        rho_sicrama = math.hypot(hedef_eski[0] - rx, hedef_eski[1] - ry)
+                    else:
+                        yaw_tahmin = math.atan2(onceki_konum[1] - ry, onceki_konum[0] - rx)
+                        hedef_eski = hedef_pozu(onceki_konum, yaw_tahmin, self.ayar)
+                        rho_sicrama = math.hypot(hedef_eski[0] - rx, hedef_eski[1] - ry)
+
+                    if rho_sicrama > self.ayar.sapma_iptal_mesafe:
+                        if self.yeniden_hedef_sayisi >= self.ayar.maks_yeniden_hedef:
+                            self.onceki_v = 0.0
+                            return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
+
+                        self.yeniden_hedef_sayisi += 1
+                        self._son_uyari = 'yeniden_hedef'
+                        uyari = 'yeniden_hedef'
+                        if not self._yaw_disaridan_verildi and self.nesne_tahmin.konum is not None:
+                            ox_y, oy_y = self.nesne_tahmin.konum
+                            self.yaklasma_yaw_odom = math.atan2(oy_y - ry, ox_y - rx)
+                        self.onceki_hedef = None
+                    else:
+                        self.onceki_v = 0.0
+                        return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
 
             # Yaklaşma yönü verilmemişse ilk ölçümde robot->nesne doğrultusu sabitlenir
             if self.yaklasma_yaw_odom is None and self.nesne_tahmin.konum is not None:
                 ox, oy = self.nesne_tahmin.konum
                 self.yaklasma_yaw_odom = math.atan2(oy - ry, ox - rx)
+
+            # İlk ölçüm sonrasında robot hedefe olcumsuz_mesafe'den yakınsa dondur
+            if self.nesne_tahmin.konum is not None and self.yaklasma_yaw_odom is not None:
+                ox_t, oy_t = self.nesne_tahmin.konum
+                hedef_t = hedef_pozu((ox_t, oy_t), self.yaklasma_yaw_odom, self.ayar)
+                if math.hypot(hedef_t[0] - rx, hedef_t[1] - ry) < self.ayar.olcumsuz_mesafe:
+                    self._tahmin_donduruldu = True
 
         # Nesne tahmini henüz hiç oluşmadıysa bekleme / zaman aşımı kontrolü
         if self.nesne_tahmin.konum is None or self.yaklasma_yaw_odom is None:
@@ -260,12 +325,27 @@ class SonYaklasma:
         hedef = hedef_pozu((ox, oy), self.yaklasma_yaw_odom, self.ayar)
         px, py, th_g = hedef
 
-        # Hedef konumda ani sıçrama kontrolü (sapma_esik)
-        if self.onceki_hedef is not None:
+        # Hedef konumda ani sıçrama kontrolü (sapma_esik, dondurulmamışsa)
+        if not self._tahmin_donduruldu and self.onceki_hedef is not None:
             hedef_sicrama = math.hypot(px - self.onceki_hedef[0], py - self.onceki_hedef[1])
             if hedef_sicrama > self.ayar.sapma_esik:
-                self.onceki_v = 0.0
-                return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
+                rho_sicrama = math.hypot(self.onceki_hedef[0] - rx, self.onceki_hedef[1] - ry)
+                if rho_sicrama > self.ayar.sapma_iptal_mesafe:
+                    if self.yeniden_hedef_sayisi >= self.ayar.maks_yeniden_hedef:
+                        self.onceki_v = 0.0
+                        return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
+
+                    self.yeniden_hedef_sayisi += 1
+                    self._son_uyari = 'yeniden_hedef'
+                    uyari = 'yeniden_hedef'
+                    if not self._yaw_disaridan_verildi:
+                        self.yaklasma_yaw_odom = math.atan2(oy - ry, ox - rx)
+                        hedef = hedef_pozu((ox, oy), self.yaklasma_yaw_odom, self.ayar)
+                        px, py, th_g = hedef
+                    self.onceki_hedef = None
+                else:
+                    self.onceki_v = 0.0
+                    return (0.0, 0.0, 'HATA:sapma', self._bos_bilgi(robot_odom_pose, t))
         self.onceki_hedef = hedef
 
         # Hata hesapları:
@@ -277,15 +357,19 @@ class SonYaklasma:
         rho = math.hypot(dx, dy)
         e_yaw = wrap(th_g - ryaw)
 
+        if rho < self.ayar.olcumsuz_mesafe:
+            self._tahmin_donduruldu = True
+
         c_g = math.cos(th_g)
         s_g = math.sin(th_g)
         e_ileri = dx * c_g + dy * s_g
         e_yanal = -dx * s_g + dy * c_g
 
         # Ölçüm kaybı ve zaman aşımı kontrolü:
-        # olcumsuz_mesafe içinde (varsayılan 0.25 m) ölçüm kaybı tolere edilir (kamera kör noktası; odomla tamamlanır).
+        # kayip_tolerans_mesafe içinde (vars. 0.40 m) ölçüm kaybı tolere edilir (kamera kör noktası; odomla tamamlanır).
         olcum_yasi = self.nesne_tahmin.yas(t)
-        if olcum_yasi > self.ayar.olcum_zaman_asimi and rho > self.ayar.olcumsuz_mesafe:
+        tolerans = max(self.ayar.olcumsuz_mesafe, self.ayar.kayip_tolerans_mesafe)
+        if olcum_yasi > self.ayar.olcum_zaman_asimi and rho > tolerans:
             self.onceki_v = 0.0
             bilgi = self._bilgi(
                 rho=rho,
@@ -297,6 +381,7 @@ class SonYaklasma:
                 olcum_yasi=olcum_yasi,
                 e_ileri=e_ileri,
                 e_yanal=e_yanal,
+                uyari=uyari,
             )
             return (0.0, 0.0, 'HATA:zaman_asimi', bilgi)
 
@@ -357,7 +442,7 @@ class SonYaklasma:
             if ileri_tamam and yaw_tamam and (yanal_tamam or yanal_uyari):
                 self._tamamlandi = True
                 self.onceki_v = 0.0
-                uyari = 'yanal' if (not yanal_tamam and yanal_uyari) else None
+                uyari = 'yanal' if (not yanal_tamam and yanal_uyari) else self._son_uyari
                 self._son_uyari = uyari
                 bilgi = self._bilgi(
                     rho=rho,
@@ -420,6 +505,7 @@ class SonYaklasma:
                 olcum_yasi=olcum_yasi,
                 e_ileri=e_ileri,
                 e_yanal=e_yanal,
+                uyari=uyari,
             )
             return (v, w, durum, bilgi)
 
@@ -522,6 +608,7 @@ class SonYaklasma:
             olcum_yasi=olcum_yasi,
             e_ileri=e_ileri,
             e_yanal=e_yanal,
+            uyari=uyari,
         )
         return (v, w, durum, bilgi)
 
@@ -537,7 +624,11 @@ class SonYaklasma:
         e_ileri: float = 0.0,
         e_yanal: float = 0.0,
         uyari: str | None = None,
+        tahmin_donduruldu: bool | None = None,
     ) -> dict:
+        donduruldu = (
+            self._tahmin_donduruldu if tahmin_donduruldu is None else bool(tahmin_donduruldu)
+        )
         bilgi_sozlugu = {
             'rho': float(rho),
             'alpha': float(alpha),
@@ -548,6 +639,7 @@ class SonYaklasma:
             'olcum_yasi': float(olcum_yasi),
             'e_ileri': float(e_ileri),
             'e_yanal': float(e_yanal),
+            'tahmin_donduruldu': donduruldu,
         }
         if uyari is not None:
             bilgi_sozlugu['uyari'] = str(uyari)

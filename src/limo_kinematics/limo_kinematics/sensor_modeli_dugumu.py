@@ -49,32 +49,191 @@ def yaw_q(q):
     return math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y ** 2 + q.z ** 2))
 
 
+PROFIL_ONAYAR = {
+    'teker': {
+        'k_w': 0.9954,
+        'k_v': 1.0188,
+        'sigma_w': 0.006,
+        'vio_olcek_kayma': 0.0,
+        'vio_yaw_kayma_deg_m': 0.0,
+        'vio_konum_ry': 0.0,
+        'vio_sicrama_hz': 0.0,
+        'vio_sicrama_konum': 0.05,
+        'vio_sicrama_yaw_deg': 2.0,
+    },
+    'vio': {
+        'k_w': 1.0,
+        'k_v': 1.0,
+        'sigma_w': 0.0,
+        'vio_olcek_kayma': 0.002,
+        'vio_yaw_kayma_deg_m': 0.3,
+        'vio_konum_ry': 0.005,
+        'vio_sicrama_hz': 0.0,
+        'vio_sicrama_konum': 0.05,
+        'vio_sicrama_yaw_deg': 2.0,
+    },
+    'vio_kotu': {
+        'k_w': 1.0,
+        'k_v': 1.0,
+        'sigma_w': 0.0,
+        'vio_olcek_kayma': 0.005,
+        'vio_yaw_kayma_deg_m': 0.8,
+        'vio_konum_ry': 0.01,
+        'vio_sicrama_hz': 0.02,
+        'vio_sicrama_konum': 0.05,
+        'vio_sicrama_yaw_deg': 2.0,
+    },
+}
+
+
 class OdomHatasi:
-    """Gerçek konum artışlarını ölçülmüş ölçek hatası + gürültüyle tümleştirir (saf, ROS'suz; test edilebilir)."""
+    """Gerçek konum artışlarını ölçülmüş ölçek hatası + gürültü / VIO hata profiliyle tümleştirir (saf, test edilebilir)."""
 
-    def __init__(self, k_w=0.9954, k_v=1.0188, sigma_w=0.006, tohum=0):
-        self.k_w, self.k_v, self.sigma_w = k_w, k_v, sigma_w
-        self.rng = np.random.default_rng(tohum)
+    def __init__(
+        self,
+        k_w=None,
+        k_v=None,
+        sigma_w=None,
+        tohum=0,
+        profil='teker',
+        vio_olcek_kayma=None,
+        vio_yaw_kayma_deg_m=None,
+        vio_konum_ry=None,
+        vio_sicrama_hz=None,
+        vio_sicrama_konum=None,
+        vio_sicrama_yaw_deg=None,
+        vio_tohum=None,
+    ):
+        self.profil = str(profil).strip().lower()
+        onayar = PROFIL_ONAYAR.get(self.profil, PROFIL_ONAYAR['teker'])
+
+        self.k_w = float(k_w) if k_w is not None else float(onayar['k_w'])
+        self.k_v = float(k_v) if k_v is not None else float(onayar['k_v'])
+        self.sigma_w = float(sigma_w) if sigma_w is not None else float(onayar['sigma_w'])
+
+        self.vio_olcek_kayma = (
+            float(vio_olcek_kayma) if vio_olcek_kayma is not None else float(onayar['vio_olcek_kayma'])
+        )
+        self.vio_yaw_kayma_deg_m = (
+            float(vio_yaw_kayma_deg_m) if vio_yaw_kayma_deg_m is not None else float(onayar['vio_yaw_kayma_deg_m'])
+        )
+        self.vio_konum_ry = (
+            float(vio_konum_ry) if vio_konum_ry is not None else float(onayar['vio_konum_ry'])
+        )
+        self.vio_sicrama_hz = (
+            float(vio_sicrama_hz) if vio_sicrama_hz is not None else float(onayar['vio_sicrama_hz'])
+        )
+        self.vio_sicrama_konum = (
+            float(vio_sicrama_konum) if vio_sicrama_konum is not None else float(onayar['vio_sicrama_konum'])
+        )
+        self.vio_sicrama_yaw_deg = (
+            float(vio_sicrama_yaw_deg) if vio_sicrama_yaw_deg is not None else float(onayar['vio_sicrama_yaw_deg'])
+        )
+
+        self.tohum = int(vio_tohum) if vio_tohum is not None else int(tohum)
+        self.rng = np.random.default_rng(self.tohum)
+
         self.onceki = None
+        self._onceki_t = None
         self.x = self.y = self.yaw = 0.0
+        self.olcek_hata = 0.0
+        self.sicrama_sayisi = 0
 
-    def adim(self, x, y, yaw):
+    def hiz_olcekle(self, vx, wz):
+        """Twist (hız) alanına ölçek hatasını uygular; sıçramayı hıza yansıtmaz."""
+        olcek_carpani = (1.0 + self.olcek_hata) / self.k_v
+        return vx * olcek_carpani, wz / self.k_w
+
+    def adim(self, x, y, yaw, dt=None, t=None):
         if self.onceki is None:
             self.onceki = (x, y, yaw)
+            if t is not None:
+                self._onceki_t = float(t)
             return self.x, self.y, self.yaw
         px, py, pyaw = self.onceki
         self.onceki = (x, y, yaw)
         dyaw = math.atan2(math.sin(yaw - pyaw), math.cos(yaw - pyaw))
-        # ileri / yanal artış, gerçek gövde çerçevesinde
         c, s = math.cos(pyaw), math.sin(pyaw)
-        ileri, yanal = c * (x - px) + s * (y - py), -s * (x - px) + c * (y - py)
-        dyaw_o = dyaw / self.k_w + self.rng.normal(0.0, self.sigma_w * math.sqrt(abs(dyaw))) if dyaw else 0.0
-        ileri, yanal = ileri / self.k_v, yanal / self.k_v
+        ileri = c * (x - px) + s * (y - py)
+        yanal = -s * (x - px) + c * (y - py)
+
+        # 'teker' profilinde ve VIO parametreleri kapalıyken eski çıktı ve RNG birebir aynı
+        vio_aktif = (self.profil != 'teker') or (
+            self.vio_olcek_kayma > 0
+            or self.vio_yaw_kayma_deg_m > 0
+            or self.vio_konum_ry > 0
+            or self.vio_sicrama_hz > 0
+        )
+
+        if not vio_aktif:
+            dyaw_o = dyaw / self.k_w + self.rng.normal(0.0, self.sigma_w * math.sqrt(abs(dyaw))) if dyaw else 0.0
+            ileri, yanal = ileri / self.k_v, yanal / self.k_v
+            orta = self.yaw + dyaw_o / 2
+            self.x += math.cos(orta) * ileri - math.sin(orta) * yanal
+            self.y += math.sin(orta) * ileri + math.cos(orta) * yanal
+            self.yaw = math.atan2(math.sin(self.yaw + dyaw_o), math.cos(self.yaw + dyaw_o))
+            return self.x, self.y, self.yaw
+
+        ds = math.hypot(ileri, yanal)
+        dtheta = abs(dyaw)
+
+        # 1. Ölçek kayması rastgele yürüyüşü (mesafeyle σ)
+        if ds > 0 and self.vio_olcek_kayma > 0:
+            self.olcek_hata += self.rng.normal(0.0, self.vio_olcek_kayma * math.sqrt(ds))
+
+        olcek_carpani = (1.0 + self.olcek_hata) / self.k_v
+        ileri_o = ileri * olcek_carpani
+        yanal_o = yanal * olcek_carpani
+
+        # 2. Konum rastgele yürüyüşü (m/√m)
+        if ds > 0 and self.vio_konum_ry > 0:
+            sg_ry = self.vio_konum_ry * math.sqrt(ds)
+            ileri_o += self.rng.normal(0.0, sg_ry)
+            yanal_o += self.rng.normal(0.0, sg_ry)
+
+        # 3. Yaw artışı ve kayması
+        dyaw_o = dyaw / self.k_w
+        if dyaw and self.sigma_w > 0:
+            dyaw_o += self.rng.normal(0.0, self.sigma_w * math.sqrt(dtheta))
+        if ds > 0 and self.vio_yaw_kayma_deg_m > 0:
+            sg_yaw = math.radians(self.vio_yaw_kayma_deg_m) * math.sqrt(ds)
+            dyaw_o += self.rng.normal(0.0, sg_yaw)
+
+        # 4. Poz entegrasyonu
         orta = self.yaw + dyaw_o / 2
-        self.x += math.cos(orta) * ileri - math.sin(orta) * yanal
-        self.y += math.sin(orta) * ileri + math.cos(orta) * yanal
+        self.x += math.cos(orta) * ileri_o - math.sin(orta) * yanal_o
+        self.y += math.sin(orta) * ileri_o + math.cos(orta) * yanal_o
         self.yaw = math.atan2(math.sin(self.yaw + dyaw_o), math.cos(self.yaw + dyaw_o))
+
+        # 5. Sıçrama (dt süresine göre tek seferlik kayma — Poisson süreci)
+        dt_val = 0.0
+        if dt is not None:
+            dt_val = float(dt)
+        elif t is not None:
+            t_f = float(t)
+            if self._onceki_t is not None and t_f > self._onceki_t:
+                dt_val = t_f - self._onceki_t
+            self._onceki_t = t_f
+
+        if self.vio_sicrama_hz > 0 and dt_val > 0:
+            p_sicrama = 1.0 - math.exp(-self.vio_sicrama_hz * dt_val)
+            if self.rng.random() < p_sicrama:
+                jx = self.rng.normal(0.0, self.vio_sicrama_konum)
+                jy = self.rng.normal(0.0, self.vio_sicrama_konum)
+                jyaw = self.rng.normal(0.0, math.radians(self.vio_sicrama_yaw_deg))
+                self.x += jx
+                self.y += jy
+                self.yaw = math.atan2(math.sin(self.yaw + jyaw), math.cos(self.yaw + jyaw))
+                self.sicrama_sayisi += 1
+
         return self.x, self.y, self.yaw
+
+
+class VioHatasi(OdomHatasi):
+    """VIO hata profilini OdomHatasi üzerine uygulayan sarmalayıcı sınıf."""
+
+    def __init__(self, *args, profil='vio', **kwargs):
+        super().__init__(*args, profil=profil, **kwargs)
 
 
 def normaller(z, K):
@@ -194,7 +353,37 @@ class SensorModeliDugumu(Node):
         dr = bolum in ('hepsi', 'derinlik')
         rk = bolum in ('hepsi', 'renk')
         self.odom_hatasi = p('odom_hatasi', True).value
-        self.oh = OdomHatasi(p('k_w', 0.9954).value, p('k_v', 1.0188).value, p('sigma_w', 0.006).value)
+        self.odom_profil = str(p('odom_profil', 'teker').value).strip().lower()
+        if self.odom_profil not in PROFIL_ONAYAR:
+            self.odom_profil = 'teker'
+        onayar = PROFIL_ONAYAR[self.odom_profil]
+
+        k_w = p('k_w', onayar['k_w']).value
+        k_v = p('k_v', onayar['k_v']).value
+        sigma_w = p('sigma_w', onayar['sigma_w']).value
+        vio_olcek_kayma = p('vio_olcek_kayma', onayar['vio_olcek_kayma']).value
+        vio_yaw_kayma_deg_m = p('vio_yaw_kayma_deg_m', onayar['vio_yaw_kayma_deg_m']).value
+        vio_konum_ry = p('vio_konum_ry', onayar['vio_konum_ry']).value
+        vio_sicrama_hz = p('vio_sicrama_hz', onayar['vio_sicrama_hz']).value
+        vio_sicrama_konum = p('vio_sicrama_konum', onayar['vio_sicrama_konum']).value
+        vio_sicrama_yaw_deg = p('vio_sicrama_yaw_deg', onayar['vio_sicrama_yaw_deg']).value
+        vio_tohum = p('vio_tohum', 0).value
+
+        self.oh = OdomHatasi(
+            k_w=k_w,
+            k_v=k_v,
+            sigma_w=sigma_w,
+            tohum=vio_tohum,
+            profil=self.odom_profil,
+            vio_olcek_kayma=vio_olcek_kayma,
+            vio_yaw_kayma_deg_m=vio_yaw_kayma_deg_m,
+            vio_konum_ry=vio_konum_ry,
+            vio_sicrama_hz=vio_sicrama_hz,
+            vio_sicrama_konum=vio_sicrama_konum,
+            vio_sicrama_yaw_deg=vio_sicrama_yaw_deg,
+            vio_tohum=vio_tohum,
+        )
+        self._son_odom_t = None
         self.nicem = p('jiroskop_nicem', 0.00349).value
         self.titresim = p('imu_titresim', True).value
         self.lidar_kayip = p('lidar_kayip', 0.033).value      # gerçek T-mini: geçerli ölçüm %96.7 (sim_real_fark)
@@ -230,9 +419,14 @@ class SensorModeliDugumu(Node):
             self.create_subscription(Imu, 'imu_ham', self._imu, qos_profile_sensor_data)
             self.p_scan = self.create_publisher(LaserScan, 'scan', qos_profile_sensor_data)
             self.create_subscription(LaserScan, 'scan_ham', self._scan, qos_profile_sensor_data)
-            self.get_logger().info(f'odom/IMU/lidar modeli: odom_hatasi={self.odom_hatasi} k_w={self.oh.k_w} '
-                                   f'k_v={self.oh.k_v} σw={self.oh.sigma_w}; jiroskop nicem {self.nicem}; '
-                                   f'IMU titreşim {self.titresim}, ivme ölçek {IVME_OLCEK}; lidar kayıp {self.lidar_kayip}')
+            self.get_logger().info(
+                f'odom/IMU/lidar modeli: profil={self.oh.profil} odom_hatasi={self.odom_hatasi} '
+                f'k_w={self.oh.k_w} k_v={self.oh.k_v} σw={self.oh.sigma_w}; '
+                f'vio_olcek_kayma={self.oh.vio_olcek_kayma} vio_yaw_kayma_deg_m={self.oh.vio_yaw_kayma_deg_m} '
+                f'vio_konum_ry={self.oh.vio_konum_ry} vio_sicrama_hz={self.oh.vio_sicrama_hz} '
+                f'vio_sicrama_konum={self.oh.vio_sicrama_konum} vio_sicrama_yaw_deg={self.oh.vio_sicrama_yaw_deg}; '
+                f'jiroskop nicem {self.nicem}; IMU titreşim {self.titresim}, ivme ölçek {IVME_OLCEK}; lidar kayıp {self.lidar_kayip}'
+            )
         elif rk:
             self.create_subscription(Odometry, '/odom_gercek', self._odom_hiz, 50)
 
@@ -257,12 +451,21 @@ class SensorModeliDugumu(Node):
         self.hiz = (m.twist.twist.linear.x, m.twist.twist.angular.z)
         p, q = m.pose.pose.position, m.pose.pose.orientation
         if self.odom_hatasi:
-            x, y, yaw = self.oh.adim(p.x, p.y, yaw_q(q))
+            sim_t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+            dt = 0.0
+            if self._son_odom_t is not None:
+                fark = sim_t - self._son_odom_t
+                if 0.0 < fark < 1.0:
+                    dt = fark
+            self._son_odom_t = sim_t
+
+            x, y, yaw = self.oh.adim(p.x, p.y, yaw_q(q), dt=dt)
             m.pose.pose.position.x, m.pose.pose.position.y = x, y
             m.pose.pose.orientation.z, m.pose.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
             m.pose.pose.orientation.x = m.pose.pose.orientation.y = 0.0
-            m.twist.twist.linear.x /= self.oh.k_v
-            m.twist.twist.angular.z /= self.oh.k_w
+            vx, wz = self.oh.hiz_olcekle(m.twist.twist.linear.x, m.twist.twist.angular.z)
+            m.twist.twist.linear.x = vx
+            m.twist.twist.angular.z = wz
         self.p_odom.publish(m)
         t = TransformStamped()
         t.header = m.header

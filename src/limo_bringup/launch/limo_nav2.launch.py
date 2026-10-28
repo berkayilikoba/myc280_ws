@@ -20,7 +20,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from nav2_common.launch import RewrittenYaml
 
@@ -42,8 +42,13 @@ def generate_launch_description():
     # /tf ve /tf_static'i göreli isme çevir ki namespace uygulanabilsin.
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
 
+    hareketli_kalkan = LaunchConfiguration('hareketli_kalkan')
     param_substitutions = {
         'use_sim_time': use_sim_time,
+        # Kalkan açıkken collision_monitor girdisi kalkanın çıkışı olur:
+        # velocity_smoother -> cmd_vel_smoothed -> hareketli_kalkan -> cmd_vel_kalkan -> collision_monitor
+        'cmd_vel_in_topic': PythonExpression(
+            ["'cmd_vel_kalkan' if '", hareketli_kalkan, "'.lower() in ('true', '1') else 'cmd_vel_smoothed'"]),
         'yaml_filename': map_yaml_file,
         'default_nav_to_pose_bt_xml': nav_to_pose_bt,
         'default_nav_through_poses_bt_xml': nav_through_poses_bt,
@@ -80,6 +85,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'derinlik_bulut', default_value='true',
             description='D435 derinliğinden /camera/depth/points üret (voxel_layer, collision_monitor)'),
+
+        DeclareLaunchArgument(
+            'hareketli_kalkan', default_value='false',
+            description='limo_autonomy hareketli_kalkan düğümünü hız zincirine ekle (bağıl hız + TTC ile durdurma)'),
 
         DeclareLaunchArgument(
             'mode', default_value='ackermann',
@@ -222,6 +231,20 @@ def generate_launch_description():
             remappings=[('image_rect', '/camera/depth/image_raw'),
                         ('camera_info', '/camera/depth/camera_info'),
                         ('points', '/camera/depth/points')]),
+
+        # Hareketli engel kalkanı (isteğe bağlı): collision_monitor engeli durağan varsayar; bu düğüm lidar
+        # kümelerini izleyip yaklaşan hareketli engelde çarpışmaya kalan süreye göre ileri hızı keser.
+        Node(
+            condition=IfCondition(hareketli_kalkan),
+            package='limo_autonomy',
+            executable='hareketli_kalkan',
+            name='hareketli_kalkan',
+            output='screen',
+            # Zincirin ortasında: düşerse collision_monitor'a girdi kesilir; hemen yeniden başlat (R1 B2.1)
+            respawn=True,
+            respawn_delay=1.0,
+            parameters=[{'use_sim_time': use_sim_time}],
+            remappings=remappings),
 
         # Zincirin sonu. Nav2'den bağımsız çalışır: engel yakınsa cmd_vel'i keser.
         Node(

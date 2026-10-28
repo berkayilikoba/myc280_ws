@@ -353,6 +353,8 @@ def main(argv=None):
     ap.add_argument('--timeout', type=float, default=120.0, help='hedef başına sim saniyesi')
     ap.add_argument('--label', default='')
     ap.add_argument('--hedefler', default=None, help='Hedef turu YAML dosyası yolu')
+    ap.add_argument('--lokalizasyon', choices=['amcl', 'yok'], default='amcl',
+                    help="yok: AMCL yok (limo_sim_nav2 localization:=yok, map->odom sabit) — ilk poz/amcl bekleme yapılmaz")
     a = ap.parse_args(argv)
 
     tour = TOUR
@@ -380,8 +382,11 @@ def main(argv=None):
         return 3
 
     bx, by, byaw = baslangic
-    nav.setInitialPose(make_pose(nav, bx, by, byaw))
-    nav.waitUntilNav2Active(localizer='amcl')
+    if a.lokalizasyon == 'amcl':
+        nav.setInitialPose(make_pose(nav, bx, by, byaw))
+        nav.waitUntilNav2Active(localizer='amcl')
+    else:
+        nav.waitUntilNav2Active(localizer='map_server')  # amcl yok; ilk poz beklenmez (yalnız amcl'de bekleniyor)
     spin_for(nav, 2.0)
 
     results = []
