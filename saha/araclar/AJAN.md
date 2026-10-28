@@ -14,8 +14,9 @@
 | Değişken | Varsayılan Değer | Açıklama |
 |---|---|---|
 | `$AJAN_AGY` | `agy` (PATH üzerinde) | Çağrılacak `agy` çalıştırılabilir ikilisinin yolu |
-| `$AJAN_DIZIN` | `~/.local/state/ajan` | Görevlerin saklandığı durum kök dizini |
+| `$AJAN_DIZIN` | `~/.local/state/ajan` | Görevlerin saklandığı durum kök dizini (veya `$XDG_STATE_HOME/ajan`) |
 | `$AJAN_AYAR` | `~/.gemini/antigravity-cli/settings.json` | Gemini izin ayar dosyası |
+| `$AJAN_DIL` | `tr` | Arayüz ve ileti dili (`tr` veya `en`) |
 
 ---
 
@@ -25,7 +26,7 @@ Her görev, `$AJAN_DIZIN/<etiket>/` altında kendi yalıtılmış ortamında bar
 
 ```text
 ~/.local/state/ajan/<etiket>/
-├── meta.json         # Durum, PID, model, son adım, token toplamı, tur geçmişi, doğrulama geçmişi
+├── meta.json         # Durum, PID, model, son adım, token toplamı, tur geçmişi (başlangıç/süre), toplam süre, doğrulama geçmişi
 ├── GEMINI.md         # Sabit ajan kuralları + görev yönergesi
 ├── calisma/          # agy çalışma dizini (cwd)
 ├── olaylar.jsonl     # Ham stream-json olay akışı
@@ -138,7 +139,7 @@ ETİKET    MODEL                  DURUM    DOGRULAMA  TUR  SÜRE   SON ADIM     
 gorev1    gemini-3.8-flash-high  bitti    ✓          2    14.2s  write_file test_son.py   2      5420
 gorev2    gemini-4-argon-high    calisiyor -         1    5.1s   run_command pytest       1      1200
 ```
-*Not: PID'si sonlanmış ancak meta kaydında 'calisiyor' kalmış görevler otomatik `kayip` durumuna düşer.*
+*Not: PID'si sonlanmış ancak meta kaydında 'calisiyor' kalmış görevler otomatik `kayip` durumuna düşer. Tablodaki SÜRE sütunu son turun süresini (`sure_s`) gösterir; tüm turların toplam süresi (`toplam_sure_s`) `meta.json` ve `--json` çıktısında yer alır.*
 
 ### 6.4 `bekle` — Görevlerin Bitmesini Bekleme
 ```bash

@@ -30,17 +30,150 @@ MODEL_ALIASES: dict[str, str] = {
 DEFAULT_MODEL = "gemini-3.8-flash-high"
 
 
-def get_state_root() -> str:
-    """Durum dizini kökünü döner ($AJAN_DIZIN veya ~/.local/state/ajan)."""
-    return os.path.abspath(
-        os.path.expanduser(
-            os.environ.get("AJAN_DIZIN", os.path.expanduser("~/.local/state/ajan"))
-        )
+def get_lang() -> str:
+    """Etkin dili döner ('en' veya 'tr')."""
+    return "en" if os.environ.get("AJAN_DIL", "").strip().lower() == "en" else "tr"
+
+
+MESSAGES: dict[str, dict[str, Any]] = {
+    "tr": {
+        "err_task_file_not_found": "Hata: Görev dosyası bulunamadı: {fpath}",
+        "err_task_input_required": "Hata: Görev için -g/--gorev-dosyalari veya -m/--mesaj gereklidir.",
+        "err_task_running": "Hata: '{etiket}' etiketli görev şu anda canlı çalışıyor (PID: {pid}).",
+        "err_task_not_found": "Hata: Görev bulunamadı: {etiket}",
+        "err_meta_read": "Hata: Görev meta dosyası okunamadı: {etiket}",
+        "err_task_not_finished": "Hata: Görev '{etiket}' henüz bitmemiş. Devam ettirilemez.",
+        "err_task_not_finished_verify": "Hata: Görev '{etiket}' henüz bitmemiş (canlı çalışıyor). Doğrulama için önce bitmesini bekleyin.",
+        "err_task_not_verifiable": "Hata: Görev '{etiket}' doğrulanabilir durumda değil ({durum}). 'bitti' ya da 'hata' durumunda olmalı.",
+        "err_no_conv_id": "Hata: '{etiket}' görevinde conversation_id bulunamadı.",
+        "err_missing_permissions": "Hata: settings.json dosyasında eksik izinler var:",
+        "hint_add_permissions": "\nİzinleri otomatik eklemek için '--izin-ekle' bayrağını kullanın.",
+        "permissions_added": "İzinler settings.json'a eklendi (Yedek: {bak}):",
+        "task_started_bg": "Görev '{etiket}' arka planda başlatıldı.",
+        "task_started_round": "Görev '{etiket}' (Tur {tur}) başlatıldı.",
+        "no_registered_tasks": "Kayıtlı görev bulunamadı.",
+        "no_tasks_to_clean": "Temizlenecek görev bulunamadı.",
+        "task_deleted": "Silindi: {entry}",
+        "tasks_cleaned": "Toplam {cleaned} eski görev temizlendi.",
+        "task_cancelled": "Görev '{etiket}' iptal edildi.",
+        "all_permissions_present": "Tüm izinler mevcut.",
+        "missing_permissions_detected": "Eksik izinler tespit edildi. settings.json dosyasına eklenmesi gereken kurallar:",
+        "no_response_yet": "Henüz yanıt oluşturulmamış.",
+        "no_report_yet": "Henüz rapor oluşturulmamış.",
+        "err_report_read": "Hata: Rapor dosyası okunamadı: {err}",
+        "err_cwd_not_found": "Hata: Çalışma dizini bulunamadı: {cwd}",
+        "watching_events": "[{etiket}] Olay akışı izleniyor (Çıkmak için Ctrl+C)...",
+        "watching_stopped": "\nİzleme durduruldu.",
+        "event_file_not_found": "Olay dosyası bulunamadı.",
+        "report_title": "=== Görev Raporu: {etiket} ===",
+        "report_success": "Başarılı: {val}",
+        "report_summary": "\nÖzet:\n  {ozet}",
+        "report_changed_files": "\nDeğişen / Yazılan Dosyalar:",
+        "report_tests": "\nÇalıştırılan Testler / Komutlar:",
+        "report_open_issues": "\nAçık Konular:",
+        "none_item": "  - Yok",
+        "yes": "Evet",
+        "no": "Hayır",
+        "not_specified": "Belirtilmedi",
+        "wait_completed": "[{etiket}] bitti (tur: {tur}, süre: {sure:.1f}s, yazılan: {yazilan} dosya)",
+        "wait_error": "[{etiket}] hata{msg} (tur: {tur}, süre: {sure:.1f}s)",
+        "wait_lost": "[{etiket}] kayip (süreç yanıt vermiyor veya sonlandı)",
+        "wait_cancelled": "[{etiket}] iptal edildi",
+        "wait_other": "[{etiket}] {st} (tur: {tur})",
+        "headers": [
+            "ETİKET",
+            "MODEL",
+            "DURUM",
+            "DOGRULAMA",
+            "TUR",
+            "SÜRE",
+            "SON ADIM",
+            "DOSYA",
+            "TOKEN",
+        ],
+    },
+    "en": {
+        "err_task_file_not_found": "Error: Task file not found: {fpath}",
+        "err_task_input_required": "Error: Either -g/--gorev-dosyalari or -m/--mesaj is required for task.",
+        "err_task_running": "Error: Task '{etiket}' is currently running (PID: {pid}).",
+        "err_task_not_found": "Error: Task not found: {etiket}",
+        "err_meta_read": "Error: Could not read task meta file: {etiket}",
+        "err_task_not_finished": "Error: Task '{etiket}' is not finished yet. Cannot continue.",
+        "err_task_not_finished_verify": "Error: Task '{etiket}' is not finished yet (currently running). Wait for completion before verification.",
+        "err_task_not_verifiable": "Error: Task '{etiket}' is not in a verifiable state ({durum}). Status must be 'bitti' or 'hata'.",
+        "err_no_conv_id": "Error: conversation_id not found in task '{etiket}'.",
+        "err_missing_permissions": "Error: Missing permissions in settings.json:",
+        "hint_add_permissions": "\nUse '--izin-ekle' flag to automatically add permissions.",
+        "permissions_added": "Permissions added to settings.json (Backup: {bak}):",
+        "task_started_bg": "Task '{etiket}' started in the background.",
+        "task_started_round": "Task '{etiket}' (Round {tur}) started.",
+        "no_registered_tasks": "No registered tasks found.",
+        "no_tasks_to_clean": "No tasks to clean.",
+        "task_deleted": "Deleted: {entry}",
+        "tasks_cleaned": "Total {cleaned} old tasks cleaned.",
+        "task_cancelled": "Task '{etiket}' cancelled.",
+        "all_permissions_present": "All permissions present.",
+        "missing_permissions_detected": "Missing permissions detected. Rules that need to be added to settings.json:",
+        "no_response_yet": "No response generated yet.",
+        "no_report_yet": "No report generated yet.",
+        "err_report_read": "Error: Could not read report file: {err}",
+        "err_cwd_not_found": "Error: Working directory not found: {cwd}",
+        "watching_events": "[{etiket}] Watching event stream (Ctrl+C to exit)...",
+        "watching_stopped": "\nWatching stopped.",
+        "event_file_not_found": "Event file not found.",
+        "report_title": "=== Task Report: {etiket} ===",
+        "report_success": "Successful: {val}",
+        "report_summary": "\nSummary:\n  {ozet}",
+        "report_changed_files": "\nChanged / Written Files:",
+        "report_tests": "\nExecuted Tests / Commands:",
+        "report_open_issues": "\nOpen Issues:",
+        "none_item": "  - None",
+        "yes": "Yes",
+        "no": "No",
+        "not_specified": "Not specified",
+        "wait_completed": "[{etiket}] completed (round: {tur}, duration: {sure:.1f}s, written: {yazilan} files)",
+        "wait_error": "[{etiket}] error{msg} (round: {tur}, duration: {sure:.1f}s)",
+        "wait_lost": "[{etiket}] lost (process not responding or terminated)",
+        "wait_cancelled": "[{etiket}] cancelled",
+        "wait_other": "[{etiket}] {st} (round: {tur})",
+        "headers": [
+            "TAG",
+            "MODEL",
+            "STATUS",
+            "VERIFY",
+            "ROUND",
+            "DURATION",
+            "LAST STEP",
+            "FILES",
+            "TOKENS",
+        ],
+    },
+}
+
+
+def tr(key: str, **kwargs: Any) -> str:
+    """Anahtar ve değişkenlere göre yerelleştirilmiş metni döner."""
+    lang = get_lang()
+    template = MESSAGES.get(lang, MESSAGES["tr"]).get(
+        key, MESSAGES["tr"].get(key, "")
     )
+    if kwargs:
+        return template.format(**kwargs)
+    return str(template)
+
+
+def get_state_root() -> str:
+    """Durum dizini kökünü döner ($AJAN_DIZIN, $XDG_STATE_HOME/ajan veya ~/.local/state/ajan)."""
+    if "AJAN_DIZIN" in os.environ:
+        return os.path.abspath(os.path.expanduser(os.environ["AJAN_DIZIN"]))
+    xdg_state = os.environ.get("XDG_STATE_HOME")
+    if xdg_state:
+        return os.path.abspath(os.path.join(os.path.expanduser(xdg_state), "ajan"))
+    return os.path.abspath(os.path.expanduser("~/.local/state/ajan"))
 
 
 def get_settings_path() -> str:
-    """Gemini settings.json yolunu döner ($AJAN_AYAR veya varsayılan)."""
+    """Gemini settings.json yolunu döner ($AJAN_AYAR veya varsayılan ~/.gemini/antigravity-cli/settings.json)."""
     return os.path.abspath(
         os.path.expanduser(
             os.environ.get(
@@ -273,6 +406,29 @@ def build_gemini_md(
     yaz_list: list[str], komut_list: list[str], gorev_metni: str
 ) -> str:
     """GEMINI.md için sabit ajan kurallarını ve görev metnini birleştirir."""
+    if get_lang() == "en":
+        yaz_str = (
+            ", ".join(yaz_list)
+            if yaz_list
+            else "none (write permission not granted)"
+        )
+        komut_str = (
+            ", ".join(komut_list)
+            if komut_list
+            else "none (terminal disabled)"
+        )
+        return (
+            "# Fixed Agent Rules\n"
+            f"- You may only write to the following directories: {yaz_str}. Any attempt to write elsewhere will be rejected and the task will fail.\n"
+            f"- Allowed commands: {komut_str}. Commands must prefix-match.\n"
+            "- Do not modify or delete files not requested by the task. Do not relax existing tests.\n"
+            '- When finished, append a JSON block at the END of your response (```json ... ```): {"ozet": "...", '
+            '"degisen_dosyalar": ["..."], "calistirilan_testler": ["command: result"], "acik_konular": ["..."], '
+            '"basarili": true|false}. ajan extracts this block into rapor.json (if not found, derives from written files and response with "basarili": null).\n\n'
+            "---\n"
+            f"## Task\n{gorev_metni}\n"
+        )
+
     yaz_str = ", ".join(yaz_list) if yaz_list else "yok (yazma izni verilmedi)"
     komut_str = ", ".join(komut_list) if komut_list else "yok (terminal kapalı)"
 
@@ -313,7 +469,9 @@ def extract_rapor(
 
     if parsed is None:
         # Kod bloğu dışında çıplak JSON dene
-        raw_match = re.search(r'(\{\s*"ozet"\s*:.*?\})\s*$', response_text, re.DOTALL)
+        raw_match = re.search(
+            r'(\{\s*"(?:ozet|summary)"\s*:.*?\})\s*$', response_text, re.DOTALL
+        )
         if raw_match:
             try:
                 candidate = json.loads(raw_match.group(1))
@@ -323,16 +481,36 @@ def extract_rapor(
                 pass
 
     if parsed is not None:
+        ozet_val = parsed.get("ozet")
+        if ozet_val is None:
+            ozet_val = parsed.get("summary", "")
+
+        degisen_val = parsed.get("degisen_dosyalar")
+        if degisen_val is None:
+            degisen_val = parsed.get("changed_files", list(yazilan_dosyalar))
+
+        testler_val = parsed.get("calistirilan_testler")
+        if testler_val is None:
+            testler_val = parsed.get("calistirilan_komutlar") or parsed.get(
+                "executed_tests", list(calistirilan_komutlar)
+            )
+
+        acik_val = parsed.get("acik_konular")
+        if acik_val is None:
+            acik_val = parsed.get("open_issues", [])
+
+        basarili_val = parsed.get("basarili")
+        if basarili_val is None and "success" in parsed:
+            basarili_val = parsed["success"]
+        if basarili_val is None and "basarili" not in parsed:
+            basarili_val = True
+
         return {
-            "ozet": parsed.get("ozet", ""),
-            "degisen_dosyalar": parsed.get(
-                "degisen_dosyalar", list(yazilan_dosyalar)
-            ),
-            "calistirilan_testler": parsed.get(
-                "calistirilan_testler", list(calistirilan_komutlar)
-            ),
-            "acik_konular": parsed.get("acik_konular", []),
-            "basarili": parsed.get("basarili", True),
+            "ozet": ozet_val,
+            "degisen_dosyalar": degisen_val,
+            "calistirilan_testler": testler_val,
+            "acik_konular": acik_val,
+            "basarili": basarili_val,
         }
 
     return {
@@ -493,6 +671,10 @@ def run_bekci(etiket: str) -> None:
         meta["durum"] = "hata"
         meta["hata"] = f"agy başlatılamadı: {e}"
         meta["sure_s"] = round(time.time() - start_time, 2)
+        prev_total = sum(
+            float(t.get("sure_s", 0.0)) for t in meta.get("turler", [])
+        )
+        meta["toplam_sure_s"] = round(prev_total + meta["sure_s"], 2)
         save_meta(task_dir, meta)
 
         default_rapor = {
@@ -643,9 +825,18 @@ def run_bekci(etiket: str) -> None:
                 )
 
     elapsed = round(time.time() - start_time, 2)
-    meta["sure_s"] = (
-        float(result_duration) if result_duration is not None else elapsed
+    tur = meta.get("tur", 1)
+    if tur > 1:
+        meta["sure_s"] = elapsed
+    else:
+        meta["sure_s"] = (
+            float(result_duration) if result_duration is not None else elapsed
+        )
+
+    prev_total = sum(
+        float(t.get("sure_s", 0.0)) for t in meta.get("turler", [])
     )
+    meta["toplam_sure_s"] = round(prev_total + meta["sure_s"], 2)
 
     with open(yanit_path, "w", encoding="utf-8") as yf:
         yf.write(final_response)
@@ -687,7 +878,7 @@ def cmd_baslat(args: argparse.Namespace) -> None:
             p = os.path.abspath(os.path.expanduser(fpath))
             if not os.path.isfile(p):
                 print(
-                    f"Hata: Görev dosyası bulunamadı: {fpath}", file=sys.stderr
+                    tr("err_task_file_not_found", fpath=fpath), file=sys.stderr
                 )
                 sys.exit(1)
             with open(p, "r", encoding="utf-8") as f:
@@ -697,7 +888,7 @@ def cmd_baslat(args: argparse.Namespace) -> None:
         gorev_metni = args.mesaj
     else:
         print(
-            "Hata: Görev için -g/--gorev-dosyalari veya -m/--mesaj gereklidir.",
+            tr("err_task_input_required"),
             file=sys.stderr,
         )
         sys.exit(1)
@@ -709,7 +900,7 @@ def cmd_baslat(args: argparse.Namespace) -> None:
             pid = meta.get("pid")
             if gorev_canli(meta):
                 print(
-                    f"Hata: '{etiket}' etiketli görev şu anda canlı çalışıyor (PID: {pid}).",
+                    tr("err_task_running", etiket=etiket, pid=pid),
                     file=sys.stderr,
                 )
                 sys.exit(3)
@@ -729,18 +920,18 @@ def cmd_baslat(args: argparse.Namespace) -> None:
     if missing_permissions:
         if args.izin_ekle:
             bak = add_permissions(missing_permissions, settings_path)
-            print(f"İzinler settings.json'a eklendi (Yedek: {bak}):")
+            print(tr("permissions_added", bak=bak))
             for r in missing_permissions:
                 print(f"  + {r}")
         else:
             print(
-                "Hata: settings.json dosyasında eksik izinler var:",
+                tr("err_missing_permissions"),
                 file=sys.stderr,
             )
             for r in missing_permissions:
                 print(f"  {r}", file=sys.stderr)
             print(
-                "\nİzinleri otomatik eklemek için '--izin-ekle' bayrağını kullanın.",
+                tr("hint_add_permissions"),
                 file=sys.stderr,
             )
             sys.exit(2)
@@ -814,7 +1005,7 @@ def cmd_baslat(args: argparse.Namespace) -> None:
         code = wait_for_tasks([etiket], zaman_asimi=None)
         sys.exit(code)
     else:
-        print(f"Görev '{etiket}' arka planda başlatıldı.")
+        print(tr("task_started_bg", etiket=etiket))
         sys.exit(0)
 
 
@@ -827,19 +1018,19 @@ def calistir_devam(
     state_root = get_state_root()
     task_dir = os.path.join(state_root, etiket)
     if not os.path.exists(task_dir):
-        print(f"Hata: Görev bulunamadı: {etiket}", file=sys.stderr)
+        print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         return 1
 
     meta = load_meta(task_dir)
     if not meta:
         print(
-            f"Hata: Görev meta dosyası okunamadı: {etiket}", file=sys.stderr
+            tr("err_meta_read", etiket=etiket), file=sys.stderr
         )
         return 1
 
     if meta.get("durum") == "calisiyor" and gorev_canli(meta):
         print(
-            f"Hata: Görev '{etiket}' henüz bitmemiş. Devam ettirilemez.",
+            tr("err_task_not_finished", etiket=etiket),
             file=sys.stderr,
         )
         return 1
@@ -847,7 +1038,7 @@ def calistir_devam(
     conversation_id = meta.get("conversation_id")
     if not conversation_id:
         print(
-            f"Hata: '{etiket}' görevinde conversation_id bulunamadı.",
+            tr("err_no_conv_id", etiket=etiket),
             file=sys.stderr,
         )
         return 1
@@ -857,6 +1048,8 @@ def calistir_devam(
     turler.append(
         {
             "tur": current_tur,
+            "baslangic": meta.get("baslangic_zamani")
+            or datetime.now().isoformat(),
             "sure_s": meta.get("sure_s", 0),
             "durum": meta.get("durum"),
             "son_adim": meta.get("son_adim"),
@@ -869,6 +1062,8 @@ def calistir_devam(
     meta["turler"] = turler
     meta["tur"] = current_tur + 1
     meta["durum"] = "calisiyor"
+    meta["baslangic_zamani"] = datetime.now().isoformat()
+    meta["sure_s"] = 0.0
     meta["takip_mesaji"] = mesaj
     meta["hata"] = None
     save_meta(task_dir, meta)
@@ -894,7 +1089,7 @@ def calistir_devam(
     if bekle:
         return wait_for_tasks([etiket], zaman_asimi=zaman_asimi)
     else:
-        print(f"Görev '{etiket}' (Tur {meta['tur']}) başlatıldı.")
+        print(tr("task_started_round", etiket=etiket, tur=meta["tur"]))
         return 0
 
 
@@ -909,20 +1104,20 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
     state_root = get_state_root()
     task_dir = os.path.join(state_root, etiket)
     if not os.path.exists(task_dir):
-        print(f"Hata: Görev bulunamadı: {etiket}", file=sys.stderr)
+        print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         sys.exit(1)
 
     meta = load_meta(task_dir)
     if not meta:
         print(
-            f"Hata: Görev meta dosyası okunamadı: {etiket}", file=sys.stderr
+            tr("err_meta_read", etiket=etiket), file=sys.stderr
         )
         sys.exit(1)
 
     # 1. ETIKET "bitti" ya da "hata" durumunda olmalı (çalışıyorsa önce bekle)
     if meta.get("durum") == "calisiyor" and gorev_canli(meta):
         print(
-            f"Hata: Görev '{etiket}' henüz bitmemiş (canlı çalışıyor). Doğrulama için önce bitmesini bekleyin.",
+            tr("err_task_not_finished_verify", etiket=etiket),
             file=sys.stderr,
         )
         sys.exit(1)
@@ -930,7 +1125,7 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
     durum = meta.get("durum")
     if durum not in ("bitti", "hata"):
         print(
-            f"Hata: Görev '{etiket}' doğrulanabilir durumda değil ({durum}). 'bitti' ya da 'hata' durumunda olmalı.",
+            tr("err_task_not_verifiable", etiket=etiket, durum=durum),
             file=sys.stderr,
         )
         sys.exit(1)
@@ -940,7 +1135,7 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
         cwd = os.path.abspath(os.path.expanduser(args.cwd))
         if not os.path.isdir(cwd):
             print(
-                f"Hata: Çalışma dizini bulunamadı: {args.cwd}", file=sys.stderr
+                tr("err_cwd_not_found", cwd=args.cwd), file=sys.stderr
             )
             sys.exit(1)
 
@@ -991,11 +1186,18 @@ def cmd_dogrula(args: argparse.Namespace) -> None:
         son_60 = (
             "\n".join(lines[-60:]) if len(lines) > 60 else "\n".join(lines)
         )
-        mesaj = (
-            f"Doğrulama komutu başarısız: {komut}\n"
-            f"```\n{son_60}\n```\n"
-            "Kök nedeni bul ve düzelt. Testleri gevşetme."
-        )
+        if get_lang() == "en":
+            mesaj = (
+                f"Verification command failed: {komut}\n"
+                f"```\n{son_60}\n```\n"
+                "Find and fix the root cause. Do not relax tests."
+            )
+        else:
+            mesaj = (
+                f"Doğrulama komutu başarısız: {komut}\n"
+                f"```\n{son_60}\n```\n"
+                "Kök nedeni bul ve düzelt. Testleri gevşetme."
+            )
 
         code = calistir_devam(etiket, mesaj, bekle=True)
         meta_after = load_meta(task_dir)
@@ -1070,6 +1272,7 @@ def cmd_durum(args: argparse.Namespace) -> None:
                 "dogrulama": dogrulama_sonucu,
                 "tur": tur,
                 "sure": sure,
+                "toplam_sure": meta.get("toplam_sure_s", sure),
                 "son_adim": son_adim,
                 "yazilan_dosya_sayisi": yazilan_sayisi,
                 "token": tokens,
@@ -1088,20 +1291,10 @@ def cmd_durum(args: argparse.Namespace) -> None:
         return
 
     if not items:
-        print("Kayıtlı görev bulunamadı.")
+        print(tr("no_registered_tasks"))
         return
 
-    headers = [
-        "ETİKET",
-        "MODEL",
-        "DURUM",
-        "DOGRULAMA",
-        "TUR",
-        "SÜRE",
-        "SON ADIM",
-        "DOSYA",
-        "TOKEN",
-    ]
+    headers = list(MESSAGES.get(get_lang(), MESSAGES["tr"])["headers"])
     rows: list[list[str]] = []
     for it in items:
         sure_val = it["sure"]
@@ -1207,21 +1400,35 @@ def wait_for_tasks(
 
         if st == "bitti":
             print(
-                f"[{etiket}] bitti (tur: {tur}, süre: {sure:.1f}s, yazılan: {yazilan} dosya)"
+                tr(
+                    "wait_completed",
+                    etiket=etiket,
+                    tur=tur,
+                    sure=sure,
+                    yazilan=yazilan,
+                )
             )
         elif st == "hata":
             all_bitti = False
             msg = f": {hata}" if hata else ""
-            print(f"[{etiket}] hata{msg} (tur: {tur}, süre: {sure:.1f}s)")
+            print(
+                tr(
+                    "wait_error",
+                    etiket=etiket,
+                    msg=msg,
+                    tur=tur,
+                    sure=sure,
+                )
+            )
         elif st == "kayip":
             all_bitti = False
-            print(f"[{etiket}] kayip (süreç yanıt vermiyor veya sonlandı)")
+            print(tr("wait_lost", etiket=etiket))
         elif st == "iptal":
             all_bitti = False
-            print(f"[{etiket}] iptal edildi")
+            print(tr("wait_cancelled", etiket=etiket))
         else:
             all_bitti = False
-            print(f"[{etiket}] {st} (tur: {tur})")
+            print(tr("wait_other", etiket=etiket, st=st, tur=tur))
 
     return 0 if all_bitti else 1
 
@@ -1239,7 +1446,7 @@ def cmd_rapor(args: argparse.Namespace) -> None:
     state_root = get_state_root()
     task_dir = os.path.join(state_root, etiket)
     if not os.path.exists(task_dir):
-        print(f"Hata: Görev bulunamadı: {etiket}", file=sys.stderr)
+        print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         sys.exit(1)
 
     if args.ham:
@@ -1248,56 +1455,56 @@ def cmd_rapor(args: argparse.Namespace) -> None:
             with open(yanit_path, "r", encoding="utf-8") as f:
                 print(f.read())
         else:
-            print("Henüz yanıt oluşturulmamış.")
+            print(tr("no_response_yet"))
         return
 
     rapor_path = os.path.join(task_dir, "rapor.json")
     if not os.path.exists(rapor_path):
-        print("Henüz rapor oluşturulmamış.")
+        print(tr("no_report_yet"))
         return
 
     try:
         with open(rapor_path, "r", encoding="utf-8") as f:
             rapor = json.load(f)
     except Exception as e:
-        print(f"Hata: Rapor dosyası okunamadı: {e}", file=sys.stderr)
+        print(tr("err_report_read", err=e), file=sys.stderr)
         sys.exit(1)
 
     basarili_val = rapor.get("basarili")
     if basarili_val is True:
-        basarili_str = "Evet"
+        basarili_str = tr("yes")
     elif basarili_val is False:
-        basarili_str = "Hayır"
+        basarili_str = tr("no")
     else:
-        basarili_str = "Belirtilmedi"
+        basarili_str = tr("not_specified")
 
-    print(f"=== Görev Raporu: {etiket} ===")
-    print(f"Başarılı: {basarili_str}")
-    print(f"\nÖzet:\n  {rapor.get('ozet', '-')}")
+    print(tr("report_title", etiket=etiket))
+    print(tr("report_success", val=basarili_str))
+    print(tr("report_summary", ozet=rapor.get("ozet", "-")))
 
     degisen = rapor.get("degisen_dosyalar", [])
-    print("\nDeğişen / Yazılan Dosyalar:")
+    print(tr("report_changed_files"))
     if degisen:
         for d in degisen:
             print(f"  - {d}")
     else:
-        print("  - Yok")
+        print(tr("none_item"))
 
     testler = rapor.get("calistirilan_testler", [])
-    print("\nÇalıştırılan Testler / Komutlar:")
+    print(tr("report_tests"))
     if testler:
         for t in testler:
             print(f"  - {t}")
     else:
-        print("  - Yok")
+        print(tr("none_item"))
 
     acik = rapor.get("acik_konular", [])
-    print("\nAçık Konular:")
+    print(tr("report_open_issues"))
     if acik:
         for a in acik:
             print(f"  - {a}")
     else:
-        print("  - Yok")
+        print(tr("none_item"))
 
 
 def cmd_izle(args: argparse.Namespace) -> None:
@@ -1305,11 +1512,11 @@ def cmd_izle(args: argparse.Namespace) -> None:
     state_root = get_state_root()
     task_dir = os.path.join(state_root, etiket)
     if not os.path.exists(task_dir):
-        print(f"Hata: Görev bulunamadı: {etiket}", file=sys.stderr)
+        print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         sys.exit(1)
 
     olaylar_path = os.path.join(task_dir, "olaylar.jsonl")
-    print(f"[{etiket}] Olay akışı izleniyor (Çıkmak için Ctrl+C)...")
+    print(tr("watching_events", etiket=etiket))
 
     waited = 0
     while not os.path.exists(olaylar_path) and waited < 50:
@@ -1317,7 +1524,7 @@ def cmd_izle(args: argparse.Namespace) -> None:
         waited += 1
 
     if not os.path.exists(olaylar_path):
-        print("Olay dosyası bulunamadı.")
+        print(tr("event_file_not_found"))
         return
 
     with open(olaylar_path, "r", encoding="utf-8") as f:
@@ -1372,7 +1579,7 @@ def cmd_izle(args: argparse.Namespace) -> None:
                         break
                     time.sleep(0.2)
         except KeyboardInterrupt:
-            print("\nİzleme durduruldu.")
+            print(tr("watching_stopped"))
 
 
 def cmd_iptal(args: argparse.Namespace) -> None:
@@ -1380,12 +1587,12 @@ def cmd_iptal(args: argparse.Namespace) -> None:
     state_root = get_state_root()
     task_dir = os.path.join(state_root, etiket)
     if not os.path.exists(task_dir):
-        print(f"Hata: Görev bulunamadı: {etiket}", file=sys.stderr)
+        print(tr("err_task_not_found", etiket=etiket), file=sys.stderr)
         sys.exit(1)
 
     meta = load_meta(task_dir)
     if not meta:
-        print("Hata: Görev bilgisi okunamadı.", file=sys.stderr)
+        print(tr("err_meta_read", etiket=etiket), file=sys.stderr)
         sys.exit(1)
 
     pid = meta.get("pid")
@@ -1433,14 +1640,14 @@ def cmd_iptal(args: argparse.Namespace) -> None:
 
     meta["durum"] = "iptal"
     save_meta(task_dir, meta)
-    print(f"Görev '{etiket}' iptal edildi.")
+    print(tr("task_cancelled", etiket=etiket))
 
 
 def cmd_temizle(args: argparse.Namespace) -> None:
     gun = args.gun
     state_root = get_state_root()
     if not os.path.exists(state_root):
-        print("Temizlenecek görev bulunamadı.")
+        print(tr("no_tasks_to_clean"))
         return
 
     now = time.time()
@@ -1462,11 +1669,11 @@ def cmd_temizle(args: argparse.Namespace) -> None:
             mtime = os.path.getmtime(tdir)
             if mtime < cutoff:
                 shutil.rmtree(tdir)
-                print(f"Silindi: {entry}")
+                print(tr("task_deleted", entry=entry))
                 cleaned += 1
         except Exception:
             pass
-    print(f"Toplam {cleaned} eski görev temizlendi.")
+    print(tr("tasks_cleaned", cleaned=cleaned))
 
 
 def cmd_izin_kontrol(args: argparse.Namespace) -> None:
@@ -1480,20 +1687,20 @@ def cmd_izin_kontrol(args: argparse.Namespace) -> None:
     if missing:
         if getattr(args, "izin_ekle", False):
             bak = add_permissions(missing, settings_path)
-            print(f"İzinler settings.json'a eklendi (Yedek: {bak}):")
+            print(tr("permissions_added", bak=bak))
             for r in missing:
                 print(f"  + {r}")
             sys.exit(0)
         else:
             print(
-                "Eksik izinler tespit edildi. settings.json dosyasına eklenmesi gereken kurallar:",
+                tr("missing_permissions_detected"),
                 file=sys.stderr,
             )
             for r in missing:
                 print(f"  {r}", file=sys.stderr)
             sys.exit(2)
     else:
-        print("Tüm izinler mevcut.")
+        print(tr("all_permissions_present"))
         sys.exit(0)
 
 
