@@ -28,8 +28,14 @@ timeout 300 ros2 action send_goal /kavra limo_interfaces/action/Kavra \
   "{nesne: {header: {frame_id: map}, point: {x: 3.73, y: 2.18, z: 0.30}}, yon_derece: .nan, algisiz_izinli: true}" --feedback \
   > $OUT/eylem.log 2>&1; echo "cikis $?"; grep -E "durum:|basarili|neden|tahmini|sure_s|Goal (accepted|finished)|status" $OUT/eylem.log | tail -12
 kill -- -$K1 2>/dev/null; sleep 4
-# 2) görev: elma (doğu duvarı dibinde, kavrama.launch varsayılanı)
-setsid ros2 launch limo_autonomy kavrama.launch.py use_sim_time:=true sahte_algi:=true > $OUT/kavrama2.log 2>&1 & PIDS+=($!); sleep 8
+# 2) görev: elma (doğu duvarı dibinde). ALGI=renk: Gazebo'ya elma modeli + kameradan renk algısı (sahte algı yok)
+if [ "${ALGI:-sahte}" = renk ]; then
+  ros2 run gazebo_ros spawn_entity.py -entity elma -file $WS/install/limo_car/share/limo_car/models/elma/model.sdf \
+    -x 5.62 -y 0.8 -z 0.04 > $OUT/spawn_elma.log 2>&1
+  setsid ros2 launch limo_autonomy kavrama.launch.py use_sim_time:=true algi:=renk nesne_z:=0.04 > $OUT/kavrama2.log 2>&1 & PIDS+=($!); sleep 8
+else
+  setsid ros2 launch limo_autonomy kavrama.launch.py use_sim_time:=true sahte_algi:=true > $OUT/kavrama2.log 2>&1 & PIDS+=($!); sleep 8
+fi
 echo "== 2) /gorev/istek elma"
 timeout 900 python3 - > $OUT/gorev.log 2>&1 <<'PY'
 import rclpy, time

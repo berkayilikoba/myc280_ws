@@ -54,3 +54,4 @@ Bitince: `ajan rapor <etiket>` → diff oku → testleri KENDİN çalıştır �
 - "Nav2 açılmadı" yanlış başarısızlıkları: ros2 lifecycle CLI keşfi; betikler bekle_aktif.py'ye geçti.
 - Damga düzeltmesi (kavrama_dugumu algı TF'i ölçüm anında): kamera algısıyla −0.46 cm / 0.16°. Uzak algı hataları iki kümeli (~4 cm / ~19 cm) — incelenecek (derinlik penceresi arka plan? ikinci kırmızı leke?).
 - Altyapı: zombi FastDDS SHM kilitleri yeni düğümleri asılı bıraktı (≈10:53–11:30 tüm sim testleri 'AMCL açılmadı'); saha/gece/shm_temizle.sh betiklerin başında. N20 sonrası algı: tüm ölçümler ort. 1.84 cm (önce 6.7–9.5), kavrama −0.65 cm/−0.12°.
+- Kamera algılı uçtan uca görev (ALGI=renk gorev_sim_test.sh): elma TAMAM, P 1.1 cm/0.8°; ilk adayda HATA:sapma kurtarması (→ N22). Kalkan son: engelsiz tur 0 yanlış alarm, yandan temas yok, karşıdan temasta durmuş (engel_carpti).
