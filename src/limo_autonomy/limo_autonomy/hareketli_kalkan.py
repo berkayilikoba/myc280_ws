@@ -41,6 +41,23 @@ Humble collision_monitor'dan Temel Farkları:
 4. TTC < ttc_dur (vars. 1.5 s) ise ileri hareketi DURDURUR; ancak GERİ hareketi ve dönüşü
    (wz) kısıtlamaz, böylece robot tehlikeden kaçabilir veya yerinde dönebilir.
 5. TTC < ttc_yavas (vars. 3.0 s) ise hızı doğrusal olarak yumuşakça yavaşlatır.
+
+Statik Harita Çıkarımı ve Lokalizasyon Kayması (N26):
+-----------------------------------------------------
+Durağan çevre unsurları (duvarlar, sabit mobilyalar), `harita_cikar` parametresi etkin
+olduğunda (varsayılan: True), map sunucusundan (`harita_konu`, varsayılan: '/map')
+alınan OccupancyGrid haritası `harita_pay_m` (vars. 0.10 m) kadar kare çekirdekle
+genişletilerek taranan noktalardan kümeleme öncesinde çıkarılır (filtrelenir). Böylece
+duvar kenarında yürüyen hareketli nesnelerin (insan vb.) duvar noktalarıyla zincirlenip
+max_iz_yaricap ile elenmesi veya duvar pürüzlerinin sahte hız üreterek yanlış alarm
+vermesi önlenir.
+
+Lokalizasyon kayması: map->odom dönüşümü yanlışsa veya kayarsa duvar noktaları harita
+maskesiyle tam örtüşmeyebilir; bu durumda duvarlar çıkarılamaz ve davranış filtreleme
+öncesindeki eski çalışma şekline döner (kötüleşmez). Özellikle saf odom modunda
+(map->odom statik/sabit varsayıldığında) zamanla odom kayması büyüyebilir. Harita konusu
+yayınlanmıyorsa veya TF bulunamazsa düğüm geriye dönük uyumlu olarak filtreleme yapmadan
+çalışmaya devam eder.
 """
 
 from __future__ import annotations
@@ -53,9 +70,14 @@ import numpy as np
 import rclpy
 import rclpy.time
 from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
 from tf2_ros import Buffer, TransformListener
@@ -229,6 +251,193 @@ def tarama_noktalari(
     return np.column_stack((x, y))
 
 
+def _orijin_ayristir(orijin: Any) -> tuple[float, float, float]:
+    """Orijini (ox, oy, yaw) olarak ayrıştırır."""
+    if hasattr(orijin, 'position'):
+        ox = float(orijin.position.x)
+        oy = float(orijin.position.y)
+        yaw = yaw_q(orijin.orientation) if hasattr(orijin, 'orientation') else 0.0
+        return ox, oy, yaw
+    if hasattr(orijin, 'x') and hasattr(orijin, 'y'):
+        ox = float(orijin.x)
+        oy = float(orijin.y)
+        yaw = float(getattr(orijin, 'yaw', 0.0))
+        return ox, oy, yaw
+    if isinstance(orijin, (list, tuple, np.ndarray)):
+        ox = float(orijin[0])
+        oy = float(orijin[1]) if len(orijin) > 1 else 0.0
+        yaw = float(orijin[2]) if len(orijin) > 2 else 0.0
+        return ox, oy, yaw
+    return 0.0, 0.0, 0.0
+
+
+def harita_maskesi_genislet(
+    grid: np.ndarray | Sequence[Sequence[Any]],
+    pay_hucre: int,
+) -> np.ndarray:
+    """Harita dolu hücre maskesini pay_hucre kadar kare çekirdekle ikili genişletir (dilatasyon).
+
+    Saf numpy ikili genişletme kullanır (scipy kullanılmaz; kare çekirdekle kaydırma/OR).
+
+    Parametreler:
+        grid: (H, W) boyutunda 2B boolean (veya ikili) dizi (row=y, col=x).
+        pay_hucre: Genişletme payı (hücre sayısı, >= 0).
+
+    Döndürür:
+        (H, W) boyutunda genişletilmiş boolean numpy dizisi.
+    """
+    mask = np.asarray(grid, dtype=bool)
+    k = int(pay_hucre)
+    if k <= 0 or not np.any(mask) or mask.ndim != 2:
+        return mask.copy()
+
+    H, W = mask.shape
+    k_x = min(k, max(0, W - 1))
+    k_y = min(k, max(0, H - 1))
+
+    # Ayrılabilir (separable) kare çekirdek: önce yatay kaydırma / OR
+    yatay = mask.copy()
+    for dx in range(1, k_x + 1):
+        yatay[:, :-dx] |= mask[:, dx:]
+        yatay[:, dx:] |= mask[:, :-dx]
+
+    # Ardından dikey kaydırma / OR
+    sonuc = yatay.copy()
+    for dy in range(1, k_y + 1):
+        sonuc[:-dy, :] |= yatay[dy:, :]
+        sonuc[dy:, :] |= yatay[:-dy, :]
+
+    return sonuc
+
+
+def haritada_dolu_mu(
+    noktalar_map: np.ndarray | Sequence[tuple[float, float]] | Sequence[Sequence[float]],
+    maske: np.ndarray | Sequence[Sequence[Any]],
+    cozunurluk: float,
+    orijin: Any,
+) -> np.ndarray:
+    """Map çerçevesindeki noktaların genişletilmiş harita maskesinde dolu olup olmadığını sorgular.
+
+    Parametreler:
+        noktalar_map: (N, 2) map çerçevesindeki koordinatlar.
+        maske: (H, W) boyutunda boolean genişletilmiş dolu hücre maskesi (row=y, col=x).
+        cozunurluk: Harita çözünürlüğü (m/hücre, ör. 0.05).
+        orijin: Harita orijini (ox, oy) veya (ox, oy, yaw) veya Pose nesnesi.
+
+    Döndürür:
+        (N,) boyutunda boolean numpy dizisi. Harita dışındaki veya geçersiz noktalar
+        False (dolu DEĞİL) döner.
+    """
+    pts = np.asarray(noktalar_map, dtype=float)
+    if pts.size == 0:
+        return np.empty(0, dtype=bool)
+    if pts.ndim == 1:
+        if pts.shape[0] == 2:
+            pts = pts.reshape(1, 2)
+        else:
+            return np.empty(0, dtype=bool)
+
+    n_pts = pts.shape[0]
+    if maske is None:
+        return np.zeros(n_pts, dtype=bool)
+
+    mask_arr = np.asarray(maske, dtype=bool)
+    if mask_arr.size == 0 or mask_arr.ndim != 2 or float(cozunurluk) <= 0.0:
+        return np.zeros(n_pts, dtype=bool)
+
+    H, W = mask_arr.shape
+    ox, oy, yaw = _orijin_ayristir(orijin)
+    res = float(cozunurluk)
+
+    dx = pts[:, 0] - ox
+    dy = pts[:, 1] - oy
+
+    if abs(yaw) > 1e-6:
+        c = math.cos(yaw)
+        s = math.sin(yaw)
+        x_g = c * dx + s * dy
+        y_g = -s * dx + c * dy
+    else:
+        x_g = dx
+        y_g = dy
+
+    gecerli_koord = np.isfinite(x_g) & np.isfinite(y_g)
+    ix = np.full(n_pts, -1, dtype=int)
+    iy = np.full(n_pts, -1, dtype=int)
+
+    ix[gecerli_koord] = np.floor(x_g[gecerli_koord] / res).astype(int)
+    iy[gecerli_koord] = np.floor(y_g[gecerli_koord] / res).astype(int)
+
+    sinirda = (ix >= 0) & (ix < W) & (iy >= 0) & (iy < H)
+    sonuc = np.zeros(n_pts, dtype=bool)
+
+    if np.any(sinirda):
+        sonuc[sinirda] = mask_arr[iy[sinirda], ix[sinirda]]
+
+    return sonuc
+
+
+def noktalar_harita_cercevesine(
+    noktalar_base: np.ndarray | Sequence[tuple[float, float]] | Sequence[Sequence[float]],
+    robot_pose_map: tuple[float, float, float] | Sequence[float],
+) -> np.ndarray:
+    """base_link çerçevesindeki (N, 2) kartezyen noktaları robotun map pozunu kullanarak
+    map çerçevesine dönüştürür.
+
+    Parametreler:
+        noktalar_base: (N, 2) kartezyen noktalar (base_link).
+        robot_pose_map: Robotun map çerçevesindeki (x, y, yaw) pozu.
+
+    Döndürür:
+        (N, 2) map çerçevesindeki noktalar.
+    """
+    pts = np.asarray(noktalar_base, dtype=float)
+    if pts.shape[0] == 0:
+        return np.empty((0, 2), dtype=float)
+    if pts.ndim == 1:
+        if pts.shape[0] == 2:
+            pts = pts.reshape(1, 2)
+        else:
+            return np.empty((0, 2), dtype=float)
+
+    mx = float(robot_pose_map[0])
+    my = float(robot_pose_map[1])
+    myaw = float(robot_pose_map[2]) if len(robot_pose_map) > 2 else 0.0
+    c = math.cos(myaw)
+    s = math.sin(myaw)
+    x_m = mx + c * pts[:, 0] - s * pts[:, 1]
+    y_m = my + s * pts[:, 0] + c * pts[:, 1]
+    return np.column_stack((x_m, y_m))
+
+
+def harita_noktalarini_ele(
+    noktalar_base: np.ndarray | Sequence[tuple[float, float]] | Sequence[Sequence[float]],
+    robot_pose_map: tuple[float, float, float] | Sequence[float],
+    maske: np.ndarray | Sequence[Sequence[Any]],
+    cozunurluk: float,
+    orijin: Any,
+) -> np.ndarray:
+    """base_link noktalarını map çerçevesine çevirip haritada dolu hücrelere düşenleri eler (saf fonksiyon).
+
+    Parametreler:
+        noktalar_base: (N, 2) base_link noktaları.
+        robot_pose_map: Robotun map çerçevesindeki (x, y, yaw) pozu.
+        maske: (H, W) boolean dolu hücre maskesi.
+        cozunurluk: Harita çözünürlüğü (m/hücre).
+        orijin: Harita orijini.
+
+    Döndürür:
+        Kalan (M, 2) base_link noktaları (sıra korunur).
+    """
+    pts = np.asarray(noktalar_base, dtype=float)
+    if pts.size == 0 or maske is None:
+        return pts
+
+    pts_map = noktalar_harita_cercevesine(pts, robot_pose_map)
+    dolu_mu = haritada_dolu_mu(pts_map, maske, cozunurluk, orijin)
+    return pts[~dolu_mu]
+
+
 def kumele(
     noktalar: np.ndarray | Sequence[tuple[float, float]] | Sequence[Sequence[float]],
     esik: float = 0.10,
@@ -369,16 +578,164 @@ class Iz:
         raise KeyError(key)
 
 
+def _iz_ongoru(iz: Any, t: float, kapi_taban: float) -> tuple[float, float, float]:
+    """İzin t anındaki öngörülen konumunu (pred_x, pred_y) ve dinamik kapı mesafesini döndürür."""
+    if hasattr(iz, 'x') and hasattr(iz, 'y'):
+        x = float(iz.x)
+        y = float(iz.y)
+        vx = float(getattr(iz, 'vx', 0.0))
+        vy = float(getattr(iz, 'vy', 0.0))
+        t_son = float(getattr(iz, 't_son', t))
+        v = float(getattr(iz, 'v', math.hypot(vx, vy)))
+    elif isinstance(iz, (list, tuple)):
+        x = float(iz[0])
+        y = float(iz[1])
+        vx = float(iz[2]) if len(iz) > 2 else 0.0
+        vy = float(iz[3]) if len(iz) > 3 else 0.0
+        t_son = float(iz[4]) if len(iz) > 4 else t
+        v = math.hypot(vx, vy)
+    else:
+        x = float(getattr(iz, 'x', 0.0))
+        y = float(getattr(iz, 'y', 0.0))
+        vx = 0.0
+        vy = 0.0
+        t_son = t
+        v = 0.0
+
+    dt = max(0.0, float(t) - t_son)
+    pred_x = x + vx * dt
+    pred_y = y + vy * dt
+    kapi_iz = float(kapi_taban) + v * dt
+    return (pred_x, pred_y, kapi_iz)
+
+
+class EslestirmeSonucu(list):
+    """Açgözlü (greedy) eşleştirme sonucu nesnesi.
+
+    Standart list[tuple[int, int]] olarak davranır (her eleman (iz_indeksi, kume_indeksi) demetidir).
+    Ayrıca eslesmeyen_izler ve eslesmeyen_kumeler özniteliklerini taşır.
+    """
+
+    eslesmeyen_izler: list[int]
+    eslesmeyen_kumeler: list[int]
+
+    def __init__(
+        self,
+        ciftler: Sequence[tuple[int, int]],
+        eslesmeyen_izler: Sequence[int] | None = None,
+        eslesmeyen_kumeler: Sequence[int] | None = None,
+    ) -> None:
+        super().__init__(ciftler)
+        self.eslesmeyen_izler = list(eslesmeyen_izler or [])
+        self.eslesmeyen_kumeler = list(eslesmeyen_kumeler or [])
+
+
+def eslestir(
+    izler: Sequence[Iz | Any],
+    merkezler_odom: Sequence[tuple[float, float]] | np.ndarray,
+    t: float = 0.0,
+    kapi: float = 0.35,
+) -> EslestirmeSonucu:
+    """Tüm (iz, küme) çiftleri için öngörülen konuma uzaklığı hesaplayıp açgözlü (greedy) eşler.
+
+    Parametreler:
+        izler: Mevcut izler listesi (Iz nesneleri veya (x, y, [vx, vy, t_son]) demetleri).
+        merkezler_odom: Yeni tespit edilen küme merkezleri [(cx, cy), ...].
+        t: Güncelleme zamanı (saniye, varsayılan 0.0).
+        kapi: Taban eşleşme kapı mesafesi (m, varsayılan 0.35). Dinamik kapı: kapi + |v|*dt.
+
+    Döndürür:
+        EslestirmeSonucu: list[tuple[int, int]] uyumlu, eslesmeyen_izler ve eslesmeyen_kumeler öznitelikli liste.
+    """
+    n_iz = len(izler)
+    n_kume = len(merkezler_odom)
+    if n_iz == 0 or n_kume == 0:
+        return EslestirmeSonucu([], list(range(n_iz)), list(range(n_kume)))
+
+    ciftler: list[tuple[float, int, int]] = []
+    for i, iz in enumerate(izler):
+        pred_x, pred_y, kapi_iz = _iz_ongoru(iz, t, kapi)
+        kapi_kare = kapi_iz * kapi_iz
+
+        for j in range(n_kume):
+            cx = float(merkezler_odom[j][0])
+            cy = float(merkezler_odom[j][1])
+            dx = pred_x - cx
+            dy = pred_y - cy
+            d2 = dx * dx + dy * dy
+            if d2 <= kapi_kare:
+                ciftler.append((d2, i, j))
+
+    # Artan uzaklıkla açgözlü (greedy) eşleme
+    ciftler.sort(key=lambda item: item[0])
+
+    eslesen_izler: set[int] = set()
+    eslesen_kumeler: set[int] = set()
+    eslesmeler: list[tuple[int, int]] = []
+
+    for _, i, j in ciftler:
+        if i in eslesen_izler or j in eslesen_kumeler:
+            continue
+        eslesen_izler.add(i)
+        eslesen_kumeler.add(j)
+        eslesmeler.append((i, j))
+
+    eslesmeyen_izler = [i for i in range(n_iz) if i not in eslesen_izler]
+    eslesmeyen_kumeler = [j for j in range(n_kume) if j not in eslesen_kumeler]
+    return EslestirmeSonucu(eslesmeler, eslesmeyen_izler, eslesmeyen_kumeler)
+
+
+def belirsiz_izler_kumesi(
+    izler: Sequence[Iz | Any],
+    merkezler_odom: Sequence[tuple[float, float]] | np.ndarray,
+    t: float = 0.0,
+    kapi: float = 0.35,
+    belirsizlik_payi: float = 0.05,
+) -> set[int]:
+    """En iyi iki adayı birbirine çok yakın ve ikisi de yakın olan izlerin indekslerini bulur.
+
+    Kriter:
+        İzin kapı içindeki en yakın iki aday kümesi d1 ve d2 (d1 <= d2) için:
+        (d2 - d1 < belirsizlik_payi) VE (d1 > 0.10 m)
+    """
+    belirsiz: set[int] = set()
+    n_kume = len(merkezler_odom)
+    if n_kume < 2:
+        return belirsiz
+
+    for i, iz in enumerate(izler):
+        pred_x, pred_y, kapi_iz = _iz_ongoru(iz, t, kapi)
+        aday_mesafeler: list[float] = []
+
+        for j in range(n_kume):
+            cx = float(merkezler_odom[j][0])
+            cy = float(merkezler_odom[j][1])
+            d = math.hypot(pred_x - cx, pred_y - cy)
+            if d <= kapi_iz:
+                aday_mesafeler.append(d)
+
+        if len(aday_mesafeler) >= 2:
+            aday_mesafeler.sort()
+            d1 = aday_mesafeler[0]
+            d2 = aday_mesafeler[1]
+            if (d2 - d1 < float(belirsizlik_payi)) and (d1 > 0.10):
+                belirsiz.add(i)
+
+    return belirsiz
+
+
 class IzTakipci:
     """Odom çerçevesindeki küme merkezlerini takip eden ve hız kestiren izleyici.
 
     Özellikler:
-        - Öngörülen konum (x + vx*dt) tabanlı en yakın komşu eşleme (kapı: 0.35 m).
-        - Belirsiz eşleşmelerde (>=2 aday küme veya >=2 aday iz) hızı ve görülmeyi sıfırlama.
+        - Öngörülen konum (x + vx*dt) tabanlı global açgözlü (greedy) eşleme (eslestir).
+        - İzin hızına göre dinamik büyüyen kapı: kapi = eslesme_kapi + |v|*dt.
+        - Daraltılmış belirsizlik tespiti: yalnız (d2 - d1 < belirsizlik_payi VE d1 > 0.10 m)
+          ise hız sıfırlanır, görülme sayısı yarıya indirilir.
+        - Eşleşmeyen iz kimliği ve hızı korunur (silme_suresi=0.5 s boyunca).
         - Robot dönüş hızı |wz| > maks_donus_hizi iken hız güncellemesini atlama (konumu güncelle, hızı koru).
         - Üstel yumuşatılmış hız kestirimi (alfa: 0.4) ve ham hız geçmişi takibi.
         - Yaş ve görülme sayısı takibi.
-        - 0.5 s boyunca görülmeyen izlerin temizlenmesi.
     """
 
     def __init__(
@@ -387,11 +744,13 @@ class IzTakipci:
         alfa: float = 0.4,
         silme_suresi: float = 0.5,
         maks_donus_hizi: float = 0.8,
+        belirsizlik_payi: float = 0.05,
     ) -> None:
         self.kapi: float = float(kapi)
         self.alfa: float = float(alfa)
         self.silme_suresi: float = float(silme_suresi)
         self.maks_donus_hizi: float = float(maks_donus_hizi)
+        self.belirsizlik_payi: float = float(belirsizlik_payi)
         self._izler: list[Iz] = []
         self._sonraki_id: int = 1
 
@@ -441,49 +800,24 @@ class IzTakipci:
                 self._izler.append(yeni_iz)
             return
 
-        # 1. Eşleştirmede izin öngörülen konumunu (x + vx*dt) kullan
-        kapi_kare = self.kapi * self.kapi
-        ciftler: list[tuple[float, int, int]] = []
-        iz_adaylari: dict[int, list[int]] = {i: [] for i in range(len(self._izler))}
-        kume_adaylari: dict[int, list[int]] = {j: [] for j in range(n_kume)}
+        # 1. Eşleştirmeyi GLOBAL yap: tüm (iz, küme) çiftleri için öngörülen konuma uzaklık;
+        # kapı içindekileri artan uzaklıkla açgözlü (greedy) ata (saf fonksiyon eslestir)
+        eslesmeler = eslestir(self._izler, merkezler_odom, t_val, self.kapi)
 
-        for i, iz in enumerate(self._izler):
-            dt_ongoru = max(0.0, t_val - iz.t_son)
-            pred_x = iz.x + iz.vx * dt_ongoru
-            pred_y = iz.y + iz.vy * dt_ongoru
-
-            for j in range(n_kume):
-                cx = float(merkezler_odom[j][0])
-                cy = float(merkezler_odom[j][1])
-                dx = pred_x - cx
-                dy = pred_y - cy
-                d2 = dx * dx + dy * dy
-                if d2 <= kapi_kare:
-                    ciftler.append((d2, i, j))
-                    iz_adaylari[i].append(j)
-                    kume_adaylari[j].append(i)
-
-        # 2. Belirsiz eşleşme tespiti:
-        # Bir iz için kapı içinde >= 2 aday küme varsa veya bir kümeye >= 2 iz adaysa
-        belirsiz_izler: set[int] = set()
-        for i, k_list in iz_adaylari.items():
-            if len(k_list) >= 2:
-                belirsiz_izler.add(i)
-
-        for j, i_list in kume_adaylari.items():
-            if len(i_list) >= 2:
-                for i_idx in i_list:
-                    belirsiz_izler.add(i_idx)
-
-        # 3. En kısa mesafeden başlayarak açgözlü (greedy) eşleme
-        ciftler.sort(key=lambda item: item[0])
+        # 2. Belirsizlik tespiti: yalnız bir izin en iyi iki adayı birbirine çok yakın ve ikisi de yakınsa
+        # (d2 - d1 < belirsizlik_payi VE d1 > 0.10 m)
+        belirsiz_izler = belirsiz_izler_kumesi(
+            self._izler,
+            merkezler_odom,
+            t_val,
+            self.kapi,
+            self.belirsizlik_payi,
+        )
 
         eslesen_izler: set[int] = set()
         eslesen_kumeler: set[int] = set()
 
-        for d2, i, j in ciftler:
-            if i in eslesen_izler or j in eslesen_kumeler:
-                continue
+        for i, j in eslesmeler:
             eslesen_izler.add(i)
             eslesen_kumeler.add(j)
 
@@ -493,10 +827,10 @@ class IzTakipci:
             cr = float(yaricaplar[j]) if j < len(yaricaplar) else iz.r
 
             if i in belirsiz_izler:
-                # Belirsiz eşleşme: hız kestirimini sıfırla, görülmeyi sıfırla (yeniden kanıtlamalı)
+                # Belirsiz eşleşme: hız kestirimini sıfırla, görülmeyi sıfırlama (yarıya indir)
                 iz.vx = 0.0
                 iz.vy = 0.0
-                iz.gorulme = 0
+                iz.gorulme = max(1, iz.gorulme // 2)
                 iz.ham_hizlar.clear()
             elif hiz_guncelle_atla:
                 # Dönüş sırasında güvenilmezlik (|wz| > maks_donus_hizi):
@@ -527,14 +861,9 @@ class IzTakipci:
                 iz.gorulme += 1
             iz.yas += 1
 
-        # Eşleşmeyen eski izlerin yaşını artır (ve belirsiz olanların hızını sıfırla)
+        # Eşleşmeyen eski izlerin yaşını artır (hız ve kimlik korunur)
         for i, iz in enumerate(self._izler):
             if i not in eslesen_izler:
-                if i in belirsiz_izler:
-                    iz.vx = 0.0
-                    iz.vy = 0.0
-                    iz.gorulme = 0
-                    iz.ham_hizlar.clear()
                 iz.yas += 1
 
         # Eşleşmeyen yeni kümelerden yeni iz oluştur
@@ -887,6 +1216,13 @@ class HareketliKalkan(Node):
         scan_konu = str(p('scan_topic', 'scan').value)
         odom_konu = str(p('odom_topic', 'odom').value)
 
+        # Statik Harita Çıkarımı Parametreleri (N26)
+        self.harita_cikar = bool(p('harita_cikar', True).value)
+        harita_konu = str(p('harita_konu', '/map').value)
+        self.harita_pay_m = float(p('harita_pay_m', 0.10).value)
+        self.harita_esik = int(p('harita_esik', 65).value)
+        self.harita_cercevesi = str(p('harita_cercevesi', 'map').value)
+
         # Lidar montajı: önce TF (base_link <- tarama çerçevesi, sabit; bir kez okunup saklanır), yoksa bu parametreler
         self.lidar_x = float(p('lidar_x', 0.0).value)
         self.lidar_y = float(p('lidar_y', 0.0).value)
@@ -906,6 +1242,7 @@ class HareketliKalkan(Node):
         hiz_alfa = float(p('hiz_alfa', 0.4).value)
         iz_silme_suresi = float(p('iz_silme_suresi', 0.5).value)
         self.maks_donus_hizi = float(p('maks_donus_hizi', 0.8).value)
+        belirsizlik_payi = float(p('belirsizlik_payi', 0.05).value)
 
         self.robot_yaricap = float(p('robot_yaricap', 0.20).value)
         self.min_engel_hizi = float(p('min_engel_hizi', 0.20).value)
@@ -924,6 +1261,7 @@ class HareketliKalkan(Node):
             alfa=hiz_alfa,
             silme_suresi=iz_silme_suresi,
             maks_donus_hizi=self.maks_donus_hizi,
+            belirsizlik_payi=belirsizlik_payi,
         )
 
         # Durum Değişkenleri
@@ -942,6 +1280,12 @@ class HareketliKalkan(Node):
         self._zaman_asimi_uyarildi: bool = False
         self._tarama_yok_uyarildi: bool = False
         self._odom_yok_uyarildi: bool = False
+
+        # Statik Harita Durum Değişkenleri (N26)
+        self._map_maske: np.ndarray | None = None
+        self._map_cozunurluk: float = 0.05
+        self._map_orijin: Any = (0.0, 0.0, 0.0)
+        self._tf_map_uyarildi: bool = False
 
         # Yayıncılar
         self.p_cmd = self.create_publisher(Twist, cmd_cikis, 10)
@@ -971,6 +1315,19 @@ class HareketliKalkan(Node):
             10,
         )
 
+        # Statik Harita Aboneliği (N26: transient_local, reliable)
+        qos_map = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=ReliabilityPolicy.RELIABLE,
+        )
+        self.create_subscription(
+            OccupancyGrid,
+            harita_konu,
+            self._map_cb,
+            qos_map,
+        )
+
         self.get_logger().info(
             f"HareketliKalkan başlatıldı: {cmd_giris} -> {cmd_cikis} (etkin={self.etkin})"
         )
@@ -988,6 +1345,81 @@ class HareketliKalkan(Node):
         self._lidar_tf_alindi = True
         self.get_logger().info(
             f'Lidar montajı TF\'ten: x={self.lidar_x:.3f} y={self.lidar_y:.3f} yaw={math.degrees(self.lidar_yaw):.1f}°')
+
+    def _map_cb(self, msg: OccupancyGrid) -> None:
+        """Statik haritayı (OccupancyGrid) alır, dolu hücreleri eşikleyip harita_pay_m kadar genişleterek saklar."""
+        try:
+            w = int(msg.info.width)
+            h = int(msg.info.height)
+            res = float(msg.info.resolution)
+            if w <= 0 or h <= 0 or res <= 0.0:
+                return
+
+            raw_data = np.asarray(msg.data, dtype=int).reshape((h, w))
+            dolu = raw_data >= self.harita_esik
+
+            pay_hucre = max(0, int(round(self.harita_pay_m / res)))
+            self._map_maske = harita_maskesi_genislet(dolu, pay_hucre)
+            self._map_cozunurluk = res
+            self._map_orijin = msg.info.origin
+            self.get_logger().info(
+                f"Statik harita güncellendi: {w}x{h}, çözünürlük={res:.3f}m, "
+                f"genişletme={pay_hucre} hücre ({self.harita_pay_m:.2f}m)"
+            )
+        except Exception as e:
+            self.get_logger().error(f"Harita işlenirken hata: {e}")
+
+    def _harita_noktalarini_filtrele(self, pts: np.ndarray, stamp: Any) -> np.ndarray:
+        """base_link noktalarını map çerçevesine çevirip genişletilmiş dolu hücreye düşenleri eler."""
+        if self._map_maske is None or pts.shape[0] == 0:
+            return pts
+
+        # TF map <- base_link bulma
+        tf_map_base = None
+        # 1. Taramanın damgasında dene
+        try:
+            zaman_tf = rclpy.time.Time.from_msg(stamp) if hasattr(stamp, 'sec') else stamp
+            tf_map_base = self.tf_buffer.lookup_transform(
+                self.harita_cercevesi,
+                self.govde_cercevesi,
+                zaman_tf,
+            )
+        except Exception:
+            # 2. Bulunamazsa en son dönüşümü dene (rclpy.time.Time())
+            try:
+                tf_map_base = self.tf_buffer.lookup_transform(
+                    self.harita_cercevesi,
+                    self.govde_cercevesi,
+                    rclpy.time.Time(),
+                )
+            except Exception:
+                pass
+
+        if tf_map_base is None:
+            # TF hiç bulunamazsa çıkarımı bu tarama için atla ve bir kez uyar
+            if not self._tf_map_uyarildi:
+                self._tf_map_uyarildi = True
+                self.get_logger().warn(
+                    f"TF {self.harita_cercevesi}<-{self.govde_cercevesi} bulunamadı; "
+                    "harita çıkarımı bu tarama için atlanıyor."
+                )
+            return pts
+
+        self._tf_map_uyarildi = False
+
+        trans = tf_map_base.transform.translation
+        rot = tf_map_base.transform.rotation
+        tx = float(trans.x)
+        ty = float(trans.y)
+        yaw = yaw_q(rot)
+
+        return harita_noktalarini_ele(
+            noktalar_base=pts,
+            robot_pose_map=(tx, ty, yaw),
+            maske=self._map_maske,
+            cozunurluk=self._map_cozunurluk,
+            orijin=self._map_orijin,
+        )
 
     def _simdi_s(self) -> float:
         """Düğüm saatine göre geçerli saniyeyi döndürür."""
@@ -1077,6 +1509,10 @@ class HareketliKalkan(Node):
             lidar_y=self.lidar_y,
             lidar_yaw=self.lidar_yaw,
         )
+
+        # Statik harita çıkarımı (N26): harita_cikar aktifse ve harita maskesi hazırsa
+        if self.harita_cikar and self._map_maske is not None and pts.shape[0] > 0:
+            pts = self._harita_noktalarini_filtrele(pts, msg.header.stamp)
 
         if pts.shape[0] == 0:
             merkezler_base: list[tuple[float, float]] = []

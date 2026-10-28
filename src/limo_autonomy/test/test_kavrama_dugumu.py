@@ -6,9 +6,14 @@ import numpy as np
 import pytest
 
 from limo_autonomy.kavrama_dugumu import (
+    durum_metni_ayristir,
     erken_kabul_durumu,
     geri_bildirim_doldur,
     guvenlik_mesafesi,
+    kalkan_bekleme_kontrolu,
+    kalkan_dur_mu,
+    kalkan_uygula,
+    kalkan_yavas_mi,
     kurtarma_durum_gecisi,
     map_noktasi_odoma,
     map_yonu_odoma,
@@ -21,6 +26,7 @@ from limo_autonomy.kavrama_dugumu import (
     wrap,
     yaw_q,
 )
+from limo_autonomy.son_yaklasma import SonYaklasma, SonYaklasmaAyar
 
 
 def test_guvenlik_mesafesi_onunde_engel():
@@ -630,3 +636,297 @@ def test_eylem_geri_bildirim_kalan_mesafe_nav_q():
     assert fb.kalan_mesafe_m == pytest.approx(0.45, abs=1e-5)
     assert fb.aday_no == 1
     assert fb.aday_sayisi == 3
+
+
+# ---------------------------------------------------------------------------
+# N24: Hareketli Engel Kalkanı Entegrasyonu Birim Testleri
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "vx, wz, durum, beklenen_vx, beklenen_wz",
+    [
+        # DUR durumları: vx=0 yapılır, wz korunur (yerinde dönüş serbest)
+        (0.10, 0.50, 'DUR', 0.0, 0.50),
+        (0.10, -0.40, 'DUR ttc=1.25s v=0.55', 0.0, -0.40),
+        (0.00, 0.60, 'DUR ttc=0.50s v=0.80', 0.0, 0.60),
+        # Geri çekilmede (vx < 0) de DUR'da vx=0 (engel arkada olabilir; kalkan yönü bilinmiyor)
+        (-0.08, 0.00, 'DUR', 0.0, 0.00),
+        (-0.08, 0.30, 'DUR ttc=0.90s v=0.40', 0.0, 0.30),
+        (-0.08, -0.20, 'dur', 0.0, -0.20),  # küçük harf
+        (0.10, 0.50, 'DUR:engel', 0.0, 0.50),
+
+        # YAVAS durumları: vx = vx * 0.5 yapılır, wz korunur
+        (0.10, 0.50, 'YAVAS', 0.05, 0.50),
+        (0.10, -0.20, 'YAVAS ttc=2.30s v=0.40', 0.05, -0.20),
+        (-0.08, 0.00, 'YAVAS', -0.04, 0.00),  # geri çekilmede de hızı yarıya indirir
+        (-0.08, 0.25, 'YAVAS ttc=2.80s v=0.35', -0.04, 0.25),
+        (0.00, 0.40, 'YAVAS', 0.00, 0.40),
+        (0.10, 0.50, 'yavas', 0.05, 0.50),  # küçük harf
+        (0.10, 0.50, 'YAVAS:hiz', 0.05, 0.50),
+
+        # Diğer/None/boş/bilinmeyen durumlar: hız komutları aynen korunur
+        (0.10, 0.50, 'serbest', 0.10, 0.50),
+        (-0.08, 0.00, 'serbest', -0.08, 0.00),
+        (0.10, 0.50, 'ODOM_YOK', 0.10, 0.50),
+        (0.10, 0.50, 'TARAMA_YOK', 0.10, 0.50),
+        (0.10, 0.50, None, 0.10, 0.50),
+        (0.10, 0.50, '', 0.10, 0.50),
+        (0.10, 0.50, 'GECERSIZ_DURUM', 0.10, 0.50),
+    ],
+)
+def test_kalkan_uygula_tablosu(vx, wz, durum, beklenen_vx, beklenen_wz):
+    """kalkan_uygula tablosu: DUR'da vx=0 (wz korunur, geri çekilmede de durur); YAVAS'ta vx*0.5; diğer değişmez."""
+    vx_out, wz_out = kalkan_uygula(vx, wz, durum)
+    assert vx_out == pytest.approx(beklenen_vx, abs=1e-6)
+    assert wz_out == pytest.approx(beklenen_wz, abs=1e-6)
+
+
+def test_kalkan_dur_ve_yavas_yardimcilari():
+    """kalkan_dur_mu ve kalkan_yavas_mi yardımcı fonksiyonları."""
+    assert kalkan_dur_mu('DUR') is True
+    assert kalkan_dur_mu('DUR ttc=1.2s v=0.5') is True
+    assert kalkan_dur_mu('dur') is True
+    assert kalkan_dur_mu('YAVAS') is False
+    assert kalkan_dur_mu('serbest') is False
+    assert kalkan_dur_mu(None) is False
+
+    assert kalkan_yavas_mi('YAVAS') is True
+    assert kalkan_yavas_mi('YAVAS ttc=2.5s v=0.3') is True
+    assert kalkan_yavas_mi('yavas') is True
+    assert kalkan_yavas_mi('DUR') is False
+    assert kalkan_yavas_mi('serbest') is False
+    assert kalkan_yavas_mi(None) is False
+
+
+def test_dur_sirasinda_zaman_asimi_dolmaz_saf_sinif():
+    """DUR sürerken SonYaklasma.duraklat(dt) ile ölçüm ve azami süre zaman aşımları dolmaz."""
+    # 1. Ölçüm zaman aşımı testi (olcum_zaman_asimi = 1.0 s)
+    ayar_olcum = SonYaklasmaAyar(
+        olcum_zaman_asimi=1.0,
+        max_sure=20.0,
+        kayip_tolerans_mesafe=0.20,  # toleransı küçük tut ki mesafe koruması değil zaman aşımı devrede olsun
+    )
+    sy_olcum = SonYaklasma(ayar=ayar_olcum, yaklasma_yaw_odom=0.0)
+
+    # t=0.0'da robot (0,0,0) konumunda nesne (0.50, 0.0) ölçümünü alıyor
+    v0, w0, durum0, bilgi0 = sy_olcum.adim((0.0, 0.0, 0.0), t=0.0, olcum_robot_xy=(0.50, 0.0))
+    assert durum0 in ('YAKLASIYOR', 'DONUYOR')
+
+    # DUR durumunda 3 saniye bekleniyor (dt=0.1 s x 30 adım = 3.0 s > 1.0 s olcum_zaman_asimi)
+    # Yeni ölçüm GELMİYOR (olcum_robot_xy=None)
+    for i in range(1, 31):
+        t_simdi = i * 0.1
+        sy_olcum.duraklat(0.1)
+        v, w, durum, bilgi = sy_olcum.adim((0.0, 0.0, 0.0), t=t_simdi, olcum_robot_xy=None)
+        # DUR sırasında zaman aşımı sayaçları ötelendiği için HATA:zaman_asimi vermemeli!
+        assert durum != 'HATA:zaman_asimi'
+        assert durum in ('YAKLASIYOR', 'DONUYOR')
+
+    # 2. Görev azami süre testi (max_sure = 2.0 s)
+    ayar_sure = SonYaklasmaAyar(
+        olcum_zaman_asimi=100.0,
+        max_sure=2.0,
+    )
+    sy_sure = SonYaklasma(ayar=ayar_sure, yaklasma_yaw_odom=0.0)
+    sy_sure.adim((0.0, 0.0, 0.0), t=0.0, olcum_robot_xy=(0.50, 0.0))
+
+    # DUR durumunda 4 saniye bekleniyor (dt=0.1 s x 40 adım = 4.0 s > 2.0 s max_sure)
+    for i in range(1, 41):
+        t_simdi = i * 0.1
+        sy_sure.duraklat(0.1)
+        v, w, durum, _ = sy_sure.adim((0.0, 0.0, 0.0), t=t_simdi, olcum_robot_xy=None)
+        assert durum != 'HATA:max_sure'
+
+
+def test_kalkan_bekleme_kontrolu_saf_fonksiyon():
+    """kalkan_bekleme_kontrolu fonksiyonunun süre hesabı ve zaman aşımı davranışı."""
+    # 1. Kalkan serbest iken: sayaç başlamaz
+    asildi, bas, gecen = kalkan_bekleme_kontrolu(None, simdi_t=100.0, kalkan_durum='serbest', maks_bekleme=15.0)
+    assert asildi is False
+    assert bas is None
+    assert gecen == 0.0
+
+    # 2. DUR başladığında: başlangıç zamanı atanır
+    asildi, bas, gecen = kalkan_bekleme_kontrolu(None, simdi_t=100.0, kalkan_durum='DUR ttc=1.2s v=0.5', maks_bekleme=15.0)
+    assert asildi is False
+    assert bas == pytest.approx(100.0)
+    assert gecen == pytest.approx(0.0)
+
+    # 3. DUR sürerken (10 saniye < 15 saniye): aşım yok
+    asildi, bas2, gecen2 = kalkan_bekleme_kontrolu(bas, simdi_t=110.0, kalkan_durum='DUR ttc=1.0s v=0.4', maks_bekleme=15.0)
+    assert asildi is False
+    assert bas2 == pytest.approx(100.0)
+    assert gecen2 == pytest.approx(10.0)
+
+    # 4. Tam 15.0 saniye: aşım yok (> 15.0 s olmalı)
+    asildi, _, gecen_tam = kalkan_bekleme_kontrolu(bas, simdi_t=115.0, kalkan_durum='DUR', maks_bekleme=15.0)
+    assert asildi is False
+    assert gecen_tam == pytest.approx(15.0)
+
+    # 5. 15.0 saniye aşıldığında (15.1 s > 15.0 s): aşım True
+    asildi, _, gecen_asildi = kalkan_bekleme_kontrolu(bas, simdi_t=115.1, kalkan_durum='DUR ttc=0.8s v=0.6', maks_bekleme=15.0)
+    assert asildi is True
+    assert gecen_asildi == pytest.approx(15.1)
+
+    # 6. Kalkan serbest kalınca: sayaç sıfırlanır
+    asildi, bas_serbest, gecen_serbest = kalkan_bekleme_kontrolu(bas, simdi_t=116.0, kalkan_durum='serbest', maks_bekleme=15.0)
+    assert asildi is False
+    assert bas_serbest is None
+    assert gecen_serbest == 0.0
+
+
+def test_sahte_dongu_kalkan_maks_bekleme_asimi():
+    """Simüle edilmiş düğüm döngüsünde DUR 15 s'den uzun sürerse KURTARMA yerine HATA:kalkan_bekleme ile iptal."""
+    class SahteKalkanDugumu:
+        def __init__(self):
+            self.durum_kodu = 'SON_YAKLASMA'
+            self.kalkan_uy = True
+            self.kalkan_durum = 'DUR ttc=1.2s v=0.5'
+            self.kalkan_maks_bekleme = 15.0
+            self._kalkan_dur_baslangic_t = None
+            self._kalkan_bekleme_bildirildi = False
+            self.son_durum_metni = ''
+            self.durduruldu = False
+            self.kurtarma_baslatildi = False
+            self.yayinlanan_hizlar = []
+
+        def _durdur(self):
+            self.durduruldu = True
+
+        def durum(self, s: str):
+            self.son_durum_metni = s
+
+        def _kurtarma_baslat(self, neden: str):
+            self.kurtarma_baslatildi = True
+            self.durum_kodu = 'KURTARMA'
+
+        def dongu_adim(self, t: float):
+            if self.durum_kodu != 'SON_YAKLASMA':
+                return
+
+            kalkan_bekliyor = bool(self.kalkan_uy and kalkan_dur_mu(self.kalkan_durum))
+            if self.kalkan_uy:
+                asildi, self._kalkan_dur_baslangic_t, gecen_s = kalkan_bekleme_kontrolu(
+                    self._kalkan_dur_baslangic_t,
+                    t,
+                    self.kalkan_durum,
+                    self.kalkan_maks_bekleme,
+                )
+                if asildi:
+                    self.durum_kodu = 'HATA'
+                    self._durdur()
+                    self.durum('HATA:kalkan_bekleme')
+                    return
+
+            v_ham = 0.08
+            w_ham = 0.10
+            v_cikis, w_cikis = kalkan_uygula(v_ham, w_ham, self.kalkan_durum)
+            self.yayinlanan_hizlar.append((v_cikis, w_cikis))
+
+            kalkan_bilgi = 'KALKAN_BEKLE ' if kalkan_bekliyor else ''
+            ayrinti_metni = f'{kalkan_bilgi}v={v_cikis:.2f} w={w_cikis:.2f} rho=0.25 m'
+            self.durum(f'SON_YAKLASMA {ayrinti_metni}')
+
+    dugum = SahteKalkanDugumu()
+
+    # 1. t=0.0'dan t=14.0'e kadar DUR sürüyor (14 s < 15 s)
+    for sec in range(15):
+        dugum.dongu_adim(float(sec))
+        assert dugum.durum_kodu == 'SON_YAKLASMA'
+        assert dugum.kurtarma_baslatildi is False
+        assert dugum.yayinlanan_hizlar[-1][0] == 0.0  # vx durdurulmuş
+        assert 'KALKAN_BEKLE' in dugum.son_durum_metni
+
+    # 2. t=15.1 saniyede kalkan_maks_bekleme aşılır -> KURTARMA değil, HATA:kalkan_bekleme olmalı
+    dugum.dongu_adim(15.1)
+    assert dugum.durum_kodu == 'HATA'
+    assert dugum.durduruldu is True
+    assert dugum.kurtarma_baslatildi is False  # KURTARMA çağrılmadı!
+    assert 'HATA:kalkan_bekleme' in dugum.son_durum_metni
+
+
+def test_sahte_dongu_kalkan_kalkinca_yaklasmaya_devam():
+    """Kalkan DUR'dan serbest'e geçtiğinde robot son yaklaşmaya normal hızla devam eder."""
+    class SahteDevamDugumu:
+        def __init__(self):
+            self.durum_kodu = 'SON_YAKLASMA'
+            self.kalkan_uy = True
+            self.kalkan_durum = 'DUR ttc=1.0s v=0.5'
+            self.kalkan_maks_bekleme = 15.0
+            self._kalkan_dur_baslangic_t = None
+            self.son_durum_metni = ''
+            self.son_vx = None
+
+        def _durdur(self):
+            pass
+
+        def durum(self, s: str):
+            self.son_durum_metni = s
+
+        def dongu_adim(self, t: float):
+            kalkan_bekliyor = bool(self.kalkan_uy and kalkan_dur_mu(self.kalkan_durum))
+            if self.kalkan_uy:
+                asildi, self._kalkan_dur_baslangic_t, _ = kalkan_bekleme_kontrolu(
+                    self._kalkan_dur_baslangic_t,
+                    t,
+                    self.kalkan_durum,
+                    self.kalkan_maks_bekleme,
+                )
+                if asildi:
+                    self.durum_kodu = 'HATA'
+                    self.durum('HATA:kalkan_bekleme')
+                    return
+
+            v_cikis, _ = kalkan_uygula(0.08, 0.0, self.kalkan_durum)
+            self.son_vx = v_cikis
+            kalkan_bilgi = 'KALKAN_BEKLE ' if kalkan_bekliyor else ''
+            self.durum(f'SON_YAKLASMA {kalkan_bilgi}v={v_cikis:.2f}')
+
+    node = SahteDevamDugumu()
+
+    # 1. t=0 .. 3 s DUR: hız sıfır, KALKAN_BEKLE bildirimi var
+    for sec in range(4):
+        node.dongu_adim(float(sec))
+        assert node.son_vx == 0.0
+        assert 'KALKAN_BEKLE' in node.son_durum_metni
+
+    # 2. t=4 s: İnsan geçti, kalkan 'serbest'
+    node.kalkan_durum = 'serbest'
+    node.dongu_adim(4.0)
+    assert node.durum_kodu == 'SON_YAKLASMA'
+    assert node.son_vx == pytest.approx(0.08)
+    assert 'KALKAN_BEKLE' not in node.son_durum_metni
+    assert node._kalkan_dur_baslangic_t is None
+
+
+def test_kurtarma_geri_cekilme_kalkan_dur_ve_asimi():
+    """KURTARMA sırasında DUR gelirse geri çekilme durur (vx=0.0); 15s aşılırsa HATA:kalkan_bekleme."""
+    # 1. Normal kurtarma: vx = -0.08
+    v_norm, w_norm = kalkan_uygula(-0.08, 0.0, 'serbest')
+    assert v_norm == pytest.approx(-0.08)
+
+    # 2. DUR durumunda: vx = 0.0 (engel arkada olabilir; kalkan yönü bilinmiyor)
+    v_dur, w_dur = kalkan_uygula(-0.08, 0.0, 'DUR ttc=0.9s v=0.4')
+    assert v_dur == pytest.approx(0.0)
+
+    # 3. KURTARMA döngüsünde 15 saniye DUR aşımı
+    dur_baslangic = 50.0
+    asildi, bas, gecen = kalkan_bekleme_kontrolu(dur_baslangic, simdi_t=65.1, kalkan_durum='DUR', maks_bekleme=15.0)
+    assert asildi is True
+    assert gecen == pytest.approx(15.1)
+
+
+def test_durum_metni_ayristir_hata_kalkan_bekleme():
+    """durum_metni_ayristir 'HATA:kalkan_bekleme' durumlarını doğru ayrıştırır."""
+    durum, ayrinti = durum_metni_ayristir('HATA:kalkan_bekleme')
+    assert durum == 'HATA'
+    assert ayrinti == 'kalkan_bekleme'
+
+    durum_ek, ayrinti_ek = durum_metni_ayristir('HATA:kalkan_bekleme 15.1 s > 15.0 s')
+    assert durum_ek == 'HATA'
+    assert ayrinti_ek == 'kalkan_bekleme 15.1 s > 15.0 s'
+
+    durum_kalkan, ayrinti_kalkan = durum_metni_ayristir('SON_YAKLASMA KALKAN_BEKLE v=0.00 w=0.00 rho=0.25 m')
+    assert durum_kalkan == 'SON_YAKLASMA'
+    assert 'KALKAN_BEKLE' in ayrinti_kalkan

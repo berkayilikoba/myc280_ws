@@ -1,0 +1,13 @@
+# masa_onu -> kuzeydogu bacağı 5 tekrar (varyans ölçümü)
+baslangic: {x: 0.0, y: 0.0, yaw_derece: 0.0}
+hedefler:
+  - {ad: masa_onu_0, x: 2.0, y: 1.2, yaw_derece: 180.0}
+  - {ad: kuzeydogu_0, x: 4.2, y: 2.3, yaw_derece: 0.0}
+  - {ad: masa_onu_1, x: 2.0, y: 1.2, yaw_derece: 180.0}
+  - {ad: kuzeydogu_1, x: 4.2, y: 2.3, yaw_derece: 0.0}
+  - {ad: masa_onu_2, x: 2.0, y: 1.2, yaw_derece: 180.0}
+  - {ad: kuzeydogu_2, x: 4.2, y: 2.3, yaw_derece: 0.0}
+  - {ad: masa_onu_3, x: 2.0, y: 1.2, yaw_derece: 180.0}
+  - {ad: kuzeydogu_3, x: 4.2, y: 2.3, yaw_derece: 0.0}
+  - {ad: masa_onu_4, x: 2.0, y: 1.2, yaw_derece: 180.0}
+  - {ad: kuzeydogu_4, x: 4.2, y: 2.3, yaw_derece: 0.0}

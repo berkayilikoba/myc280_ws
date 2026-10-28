@@ -24,6 +24,6 @@ python3 $WS/saha/gece/bekle_aktif.py /bt_navigator 180
 python3 $WS/saha/gece/bekle_aktif.py /bt_navigator 5 || { echo "Nav2 açılmadı"; exit 1; }
 echo "== tur ($EK)"
 timeout 1500 python3 $WS/src/limo_bringup/scripts/nav_bench.py --mode diff --out $OUT/tur.json --timeout 150 \
-  --hedefler $WS/src/limo_bringup/scripts/nav_tur_lab_oda.yaml $(echo "$EK" | grep -q "localization:=yok" && echo "--lokalizasyon yok") > $OUT/tur.log 2>&1; echo "cikis $?"
+  --hedefler ${HEDEFLER:-$WS/src/limo_bringup/scripts/nav_tur_lab_oda.yaml} $(echo "$EK" | grep -q "localization:=yok" && echo "--lokalizasyon yok") > $OUT/tur.log 2>&1; echo "cikis $?"
 tail -25 $OUT/tur.log
 echo "çıktı: $OUT"

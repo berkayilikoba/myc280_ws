@@ -219,6 +219,20 @@ class SonYaklasma:
         """Nesne tahmininin kör nokta nedeniyle dondurulup dondurulmadığı."""
         return self._tahmin_donduruldu
 
+    def duraklat(self, dt: float) -> None:
+        """Dış duraklama veya kalkan beklemesinde zaman aşımı sayaçlarını öteler.
+
+        Parametreler:
+            dt: Duraklanan süre (saniye).
+        """
+        if dt <= 0.0:
+            return
+        if self.t_baslangic is not None:
+            self.t_baslangic += float(dt)
+        if self.nesne_tahmin.son_zaman is not None:
+            self.nesne_tahmin.son_zaman += float(dt)
+        self.onceki_v = 0.0
+
     def adim(
         self,
         robot_odom_pose: tuple[float, float, float],

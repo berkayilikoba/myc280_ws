@@ -136,7 +136,8 @@ controller_server:
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
       required_movement_radius: 0.15
-      movement_time_allowance: 20.0
+      # 20 -> 10 s: dar geçitte voxel takılmasında kurtarmaya erken geç (bati_dar 50 -> 40 s, tur 111 -> 101 s; 28.10 sim)
+      movement_time_allowance: 10.0
 
     general_goal_checker:
       stateful: True
@@ -220,7 +221,9 @@ controller_server:
         offset_from_furthest: 4
         threshold_to_consider: 0.5
         max_angle_to_furthest: 1.0
-        forward_preference: false
+        # true: yol geri yönde hizalanmaz. false iken 180° bakan robot 2.5 m'yi geri geri sürüyordu (masa_onu->kuzeydogu
+        # 26/28 s geri; lidar arkayı görmüyor -123°..+141°). true: 15 s, 1.5 s geri; tur 123 -> 111 s (28.10 sim).
+        forward_preference: true
 
 local_costmap:
   local_costmap:
