@@ -4,6 +4,7 @@ import math
 
 import numpy as np
 import pytest
+import rclpy
 
 from limo_autonomy.kavrama_gorsel import (
     AYAK_IZI_DX,

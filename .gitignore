@@ -17,3 +17,5 @@ saha/oda/*.log
 saha/nav/cikti/
 saha/nav/cikti_*.log
 saha/*/agy_*.log
+saha/gece/cikti/
+saha/gece/cikti_*.log

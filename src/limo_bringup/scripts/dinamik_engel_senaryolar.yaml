@@ -1,0 +1,41 @@
+# Dinamik engel senaryoları (lab_oda haritası / Gazebo dünyası)
+# Harita = dünya koordinat çerçevesi; robot (0.0, 0.0, 0.0)'dan başlar.
+
+karsidan:
+  aciklama: "Robota doğru karşıdan yürüyen dinamik engel"
+  robot_hedef: [3.0, 0.3, 0.0]
+  engel:
+    yol:
+      - [4.5, 0.3]
+      - [0.5, 0.3]
+    hiz: 0.6
+    gecikme_s: 0.0
+
+yandan_kesen:
+  aciklama: "Robotun yolunu dik kesen hareketli engel"
+  robot_hedef: [3.0, 0.3, 0.0]
+  engel:
+    yol:
+      - [1.5, 1.5]
+      - [1.5, -0.6]
+    hiz: 0.8
+    gecikme_s: 2.0
+
+duran_engel:
+  aciklama: "Koridoru kapatan sabit silindir engel"
+  robot_hedef: [3.0, 0.3, 0.0]
+  engel:
+    yol:
+      - [1.6, 0.3]
+    hiz: 0.0
+    gecikme_s: 0.0
+
+takip:
+  aciklama: "Robotun 1 m önünde aynı yönde yürüyen engel"
+  robot_hedef: [4.6, 0.8, 0.0]
+  engel:
+    yol:
+      - [1.0, 0.0]
+      - [4.0, 0.0]
+    hiz: 0.25
+    gecikme_s: 0.0

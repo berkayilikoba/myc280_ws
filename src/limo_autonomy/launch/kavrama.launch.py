@@ -76,19 +76,19 @@ def generate_launch_description() -> LaunchDescription:
 
     nesne_x_arg = DeclareLaunchArgument(
         'nesne_x',
-        default_value='0.23',
+        default_value='5.62',
         description='Sahte algı için nesnenin dünya (map) x koordinatı (m).',
     )
 
     nesne_y_arg = DeclareLaunchArgument(
         'nesne_y',
-        default_value='1.40',
+        default_value='0.8',
         description='Sahte algı için nesnenin dünya (map) y koordinatı (m).',
     )
 
     nesne_z_arg = DeclareLaunchArgument(
         'nesne_z',
-        default_value='0.75',
+        default_value='0.10',
         description='Sahte algı için nesnenin dünya (map) z koordinatı (m).',
     )
 
@@ -130,7 +130,36 @@ def generate_launch_description() -> LaunchDescription:
         }],
     )
 
+    gorsel_arg = DeclareLaunchArgument(
+        'gorsel', default_value='true',
+        description='Kavrama görselleştirme düğümü (/kavrama/isaretler MarkerArray).')
+
+    rviz_arg = DeclareLaunchArgument(
+        'rviz', default_value='false',
+        description='RViz2 kavrama.rviz yapılandırmasıyla başlat.')
+
+    gorsel_node = Node(
+        package='limo_autonomy',
+        executable='kavrama_gorsel',
+        name='kavrama_gorsel',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('gorsel')),
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+    )
+
+    rviz_node = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz_kavrama',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('rviz')),
+        arguments=['-d', os.path.join(get_package_share_directory('limo_autonomy'), 'config', 'kavrama.rviz')],
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+    )
+
     return LaunchDescription([
+        gorsel_arg,
+        rviz_arg,
         use_sim_time_arg,
         harita_arg,
         nesneler_arg,
@@ -142,4 +171,6 @@ def generate_launch_description() -> LaunchDescription:
         kavrama_node,
         gorev_node,
         sahte_algi_node,
+        gorsel_node,
+        rviz_node,
     ])
