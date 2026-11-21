@@ -19,3 +19,13 @@ saha/nav/cikti_*.log
 saha/*/agy_*.log
 saha/gece/cikti/
 saha/gece/cikti_*.log
+build/
+install/
+log/
+__pycache__/
+*.pyc
+build/
+install/
+log/
+__pycache__/
+*.pyc

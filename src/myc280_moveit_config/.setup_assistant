@@ -1,0 +1,25 @@
+moveit_setup_assistant_config:
+  urdf:
+    package: limo_description
+    relative_path: urdf/limo_mycobot.xacro
+  srdf:
+    relative_path: config/limo_mycobot.srdf
+  package_settings:
+    author_name: berkay
+    author_email: ilikobaberkay@gmail.com
+    generated_timestamp: 1795279171
+  control_xacro:
+    command:
+      - position
+    state:
+      - position
+      - velocity
+  modified_urdf:
+    xacros:
+      - control_xacro
+  control_xacro:
+    command:
+      - position
+    state:
+      - position
+      - velocity

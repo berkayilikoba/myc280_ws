@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="limo_mycobot">
+    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+
+    <!-- Import limo_mycobot urdf file -->
+    <xacro:include filename="$(find limo_description)/urdf/limo_mycobot.xacro" />
+
+    <!-- Import control_xacro -->
+    <xacro:include filename="limo_mycobot.ros2_control.xacro" />
+
+
+    <xacro:limo_mycobot_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
+
+</robot>
