@@ -1,102 +1,197 @@
-# LIMO ROS 2 Humble çalışma alanı
+# myc280_ws
 
-AgileX LIMO (+ myCobot 280) için ROS 2 Humble yığını: gerçek robotta haritalama, Nav2 ile otonom sürüş ve
-kamera/odom veri seti kaydı; gerçek ölçümlerle beslenmiş Gazebo 11 simülasyonu.
+A ROS 2 Humble workspace for working with the Elephant Robotics **myCobot 280** arm mounted on an AgileX **LIMO** mobile base. The current focus is **self-collision checking and collision-free motion testing with MoveIt 2**.
 
-## Nereden başlamalı?
+The workspace is built on top of [HSGunes/limo_ws](https://github.com/HSGunes/limo_ws). 
 
-| Ne yapmak istiyorsunuz? | Bakın |
-|---|---|
-| Gerçek robotta harita çıkarmak, Nav2 ile sürmek, dikdörtgen tur + rosbag kaydı | [`saha/README.md`](saha/README.md) |
-| Kayıtlardaki kamera karelerine poz eşlemek (dış kalibrasyon, çerçeve zinciri) | [`saha/config/kamera_kalibrasyon.yaml`](saha/config/kamera_kalibrasyon.yaml) |
-| Simülasyonda Nav2 / kontrolcü denemek | [Simülasyon](#simülasyon) |
-| Robotun odom/sensör davranışını anlamak | [`docs/odom_analizi.md`](docs/odom_analizi.md), [`docs/sensor_modeli.md`](docs/sensor_modeli.md) |
-| Gerçek robotta EKF (teker + IMU) çalıştırmak, başlangıca dönüş hatasını ölçmek | [`src/limo_localization`](src/limo_localization) (`ekf.launch.py`, `drive_pattern`, `donus_hatasi`) |
+---
 
-## Robot
+## 1. Requirements
 
-| | |
-|---|---|
-| Bilgisayar | Jetson Orin Nano, Ubuntu 20.04, L4T R35.4.1 |
-| Sürücüler | ROS 2 **Foxy**, robotta `~/limo_ros2_ws` (fabrika; dokunmayın) |
-| Sürüş modu | FOUR_DIFF (4 teker diferansiyel); dönüşte tekerler kayar |
-| Sensörler | YDLIDAR T-mini (6 Hz, arka ~96° kör), taban IMU (100 Hz), Orbbec Dabai DC1 renk+derinlik (30 Hz) |
-| Ağ | Wi-Fi `Robot_Lab`, sabit IP **192.168.0.200**, kullanıcı `agilex`, `ROS_DOMAIN_ID=77` |
+| Component | Version / Description |
+| --- | --- |
+| Operating System | Ubuntu 22.04 LTS |
+| ROS 2 | Humble Hawksbill |
+| Simulator | Gazebo 11 (Classic) |
+| Motion planning | MoveIt 2 (2.5.x) |
+| Python | 3.10+ |
 
-PC tarafı Humble, robot tarafı Foxy; standart konular/TF üzerinden konuşurlar (aynı domain, `ROS_LOCALHOST_ONLY=0`).
-Robot başka ekiplerce de kullanılıyor: oradaki Noetic çalışma alanlarına, `~/.bashrc`'ye ve verilere dokunmayın.
-
-## Kurulum (PC: Ubuntu 22.04, ROS 2 Humble)
+Install the required ROS packages:
 
 ```bash
-sudo apt install ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-slam-toolbox \
-  ros-humble-robot-localization ros-humble-gazebo-ros-pkgs ros-humble-xacro ros-humble-teleop-twist-keyboard \
-  python3-opencv python3-scipy
-git clone https://github.com/HSGunes/limo_ws.git ~/limo_ws && cd ~/limo_ws
-rosdep install --from-paths src --ignore-src -y
-colcon build --symlink-install && source install/setup.bash
-ssh-copy-id agilex@192.168.0.200          # saha betikleri parolasız SSH ister
+sudo apt update
+sudo apt install -y \
+  ros-humble-moveit ros-humble-moveit-setup-assistant ros-humble-moveit-configs-utils \
+  ros-humble-gazebo-ros-pkgs ros-humble-gazebo-ros2-control \
+  ros-humble-ros2-control ros-humble-ros2-controllers \
+  ros-humble-xacro ros-humble-robot-state-publisher ros-humble-joint-state-publisher \
+  ros-humble-rviz2 liburdfdom-tools \
+  python3-colcon-common-extensions python3-rosdep
 ```
 
-## Dizinler
+---
 
-| Yol | İçerik |
-|---|---|
-| `saha/` | Gerçek robot betikleri (harita, Nav2, tur, kayıt, kamera), robot tarafı düğüm (`robot/odom_duzelt.py`), gerçek robot Nav2/SLAM ayarları (`config/`), haritalar, analiz betikleri |
-| `src/limo_bringup` | Sim ve Nav2 launch dosyaları, Nav2 parametreleri (sim), davranış ağaçları, sim ölçüm betikleri (`scripts/`) |
-| `src/limo_description`, `src/limo_car`, `src/mycobot_description` | URDF/xacro, Gazebo modelleri ve dünyalar |
-| `src/limo_kinematics` | Kinematik hesapları, sim taban tepki modeli (`taban_modeli`), testler |
-| `src/limo_autonomy` | Görev planlayıcı + `patrol` düğümü + testler |
-| `src/limo_localization` | robot_localization EKF (`config/ekf_robot.yaml`), dikdörtgen sürüş (`drive_pattern`), başlangıca dönüş ölçümü (`donus_hatasi`), RTAB-Map RGB-D görsel odometri + testler |
-| `src/limo_base`, `src/limo_msgs` | Humble sürücü çatalı (yaw ölü bandı parametreli; robotta henüz kullanılmıyor), mesajlar |
-| `docker/` | Jetson için Humble imajı (henüz robotta derlenmedi; şu an gerek yok) |
-| `docs/` | Bulgular ve ölçümler |
+## 2. Installation and Build
 
-## Testler
+1. Clone the repository:
 
 ```bash
-colcon test && colcon test-result --verbose
+cd ~
+git clone https://github.com/berkayilikoba/myc280_ws.git
+cd ~/myc280_ws
 ```
 
-gtest (`limo_base` kinematiği), pytest (`limo_kinematics`, `limo_autonomy`, `limo_localization`; URDF testleri
-`xacro` ister, workspace source edilmiş olmalı) ve ament lint testleri.
-
-## Simülasyon
+2. Build. Use a clean terminal that has **only** `/opt/ros/humble` sourced. Sourcing another workspace with the same package names (for example another `limo_ws` copy) causes conflicts.
 
 ```bash
-ros2 launch limo_bringup limo_sim_nav2.launch.py mode:=diff localization:=amcl        # AMCL + hazır harita
-ros2 launch limo_bringup limo_sim_nav2.launch.py mode:=ackermann localization:=slam   # SLAM
-ros2 launch limo_autonomy patrol.launch.py use_sim_time:=true set_initial_pose:=true  # ayrı terminal: devriye
+source /opt/ros/humble/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install --packages-up-to limo_description limo_car mycobot_description
+source install/setup.bash
 ```
 
-Sim, gerçek robottan ölçülen değerlerle beslenir ([`docs/sensor_modeli.md`](docs/sensor_modeli.md)): lidar 6 Hz / 481
-nokta / 7 mm gürültü / arka kör sektör, IMU gürültüsü, taban tepki modeli (ileri harekette 0.3 s gecikme + yavaş
-hızlanma; diff modunda `taban_modeli` düğümü). myCobot eklemleri simde kilitli (`kol_kilit:=true`, varsayılan).
+3. Verify:
 
-Ölçüm betikleri (`src/limo_bringup/scripts/`): `bench_many.sh` (headless, 6 hedefli Nav2 turu × N, özet),
-`patrol_run.sh`, `video_run.sh`, `sim_ikiz.py` (gerçek kayıttaki komutları sime oynatıp tepkiyi karşılaştırır),
-`sensor_olc.py`. Paralel koşularda her koşu ayrı `ROS_DOMAIN_ID` (≤101) kullanır.
+```bash
+echo $AMENT_PREFIX_PATH        # should list only myc280_ws and /opt/ros/humble
+ros2 pkg list | grep -E "limo_description|mycobot_description"
+xacro $(ros2 pkg prefix --share limo_description)/urdf/limo_mycobot.xacro > /tmp/limo_mycobot.urdf
+check_urdf /tmp/limo_mycobot.urdf
+```
 
-## Ekip çalışma kuralları
+`check_urdf` should report `root Link: base_footprint` and the arm chain `joint1 -> ... -> joint6_flange`.
 
-**Robot:**
-- Robotu aynı anda tek kişi/tek yığın sürer. Başlamadan `saha/nav_dur.sh` ile kimsenin sürücüsünün açık olmadığına
-  bakın (betikler robotta sürücü açıksa zaten başlamaz).
-- Robot hareket ederken başında biri olsun; acil durdurma `saha/nav_dur.sh` (önce taban sürücüsünü kapatır).
-- Robot süreçleri `SURE` saniye sonra kendiliğinden kapanır (Nav2 30 dk, kamera 20 dk, kayıt 10 dk).
-- Kayıtlar robotta `~/limo_kayit/` altına yazılır; işiniz bitince PC'ye alıp robottan silin (diskte ~17 GB boş).
-  `sudo` gerektiren her şey (paket kurulumu, ağ, sistem ayarı) robot sorumlusunun onayıyla.
+---
 
-**Git:**
-- `main`'e doğrudan değil, dal + pull request ile katkı verin (`git switch -c ad/konu`).
-- Rosbag ve büyük veri depoya girmez (`.gitignore`: `*.db3`); paylaşmak için ortak sürücü kullanın, yolunu PR'da yazın.
-- Gerçek robotta denenmiş değişiklikte ölçümü (ör. köşe hataları, konu hızları) PR açıklamasına ekleyin.
+## 3. Robot Model
 
-## Durum (09.10.2026)
+The combined model is `limo_description/urdf/limo_mycobot.xacro`. It includes the LIMO base and the arm from `mycobot_description`.
 
-- Gerçek robotta: haritalama, Nav2 (MPPI + AMCL, 3/3 hedef), dikdörtgen tur (odom ile; 6 m'de başlangıca 4.9 cm /
-  −3.3° dönüş, lidar ICP ile ölçüldü), robot üzerinde kayıpsız odom/IMU/lidar kaydı, kamerali kayıt çalışıyor.
-- Açık sorunlar: kamera kaydı ~20 Hz (yayın 30 Hz), AMCL yeni odada güvenilir değil, kamera yaw kalibrasyonu
-  ölçülmedi. Ayrıntı: [`saha/README.md#bilinen-sorunlar--yapılacaklar`](saha/README.md#bilinen-sorunlar--yapılacaklar).
-- Sim bulguları ve kontrolcü karşılaştırmaları: [`docs/gece_raporu_2026-09-23.md`](docs/gece_raporu_2026-09-23.md)
-  (raporda geçen `bench/...` ölçüm klasörleri depoda değil).
+| Item | Value |
+| --- | --- |
+| Root link | `base_footprint` |
+| Arm chain | `joint1` -> `joint6_flange` |
+| Arm joints | `joint2_to_joint1`, `joint3_to_joint2`, `joint4_to_joint3`, `joint5_to_joint4`, `joint6_to_joint5`, `joint6output_to_joint6` |
+| Wheel joints | `front_left_wheel`, `front_right_wheel`, `rear_left_wheel`, `rear_right_wheel` |
+| Xacro arguments | `mode` (default `diff`), `kol_x` (default `-0.01`), `kol_z` (default `0.04`) |
+
+Collision geometry is made of simple cylinders and boxes, which the MoveIt collision matrix is generated from.
+
+---
+
+## 4. Self-Collision Setup (MoveIt Setup Assistant)
+
+The MoveIt configuration package `myc280_moveit_config` is generated with the MoveIt Setup Assistant.
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/myc280_ws/install/setup.bash
+ros2 launch moveit_setup_assistant setup_assistant.launch.py
+```
+
+Settings used:
+
+1. **Load** `src/limo_description/urdf/limo_mycobot.xacro`.
+2. **Self-Collisions:** sampling density `10000`, then *Generate Collision Matrix*.
+3. **Virtual Joints:** `virtual_joint`, child `base_footprint`, parent `world`, type `fixed`.
+4. **Planning Group:** `arm_group`, solver `kdl_kinematics_plugin/KDLKinematicsPlugin`, kinematic chain from `joint1` to `joint6_flange`.
+5. **Robot Poses:** `home`, all joints at 0.
+6. **Passive Joints:** the four wheel joints.
+7. **ROS 2 Controllers:** `arm_group_controller` (`joint_trajectory_controller/JointTrajectoryController`, position interface).
+8. **Output package:** `src/myc280_moveit_config`.
+
+Build and open the demo:
+
+```bash
+cd ~/myc280_ws
+colcon build --symlink-install --packages-select myc280_moveit_config
+source install/setup.bash
+ros2 launch myc280_moveit_config demo.launch.py
+```
+
+In RViz, open the MotionPlanning panel and move the arm with the interactive marker or the Joints tab. Links in collision turn red. If the arm never turns red, untick **Use Collision-Aware IK** in the Planning tab, which otherwise rejects colliding goals before they are shown.
+
+---
+
+## 5. Random Collision Test
+
+`random_collision_test.py` samples random joint configurations and checks each one with the MoveIt `/check_state_validity` service:
+
+- If the target pose or the straight joint-space path to it is in collision, an error with the colliding link pair is printed to the terminal.
+- If it is collision-free, the arm moves to that pose in RViz.
+
+Terminal 1:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/myc280_ws/install/setup.bash
+ros2 launch myc280_moveit_config demo.launch.py
+```
+
+Terminal 2:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/myc280_ws/install/setup.bash
+python3 ~/myc280_ws/random_collision_test.py
+```
+
+Parameters:
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `fake` | `true` | Node publishes `/joint_states` itself (no controller needed). Set `false` to send trajectories to `controller_topic`. |
+| `controller_topic` | `/arm_group_controller/joint_trajectory` | Used when `fake:=false`. |
+| `limit_ratio` | `0.9` | Fraction of each joint limit used for sampling. |
+| `speed` | `0.5` | Motion speed in rad/s. |
+| `hold_time` | `1.0` | Wait at each target in seconds. |
+| `path_steps` | `15` | Number of interpolation points checked along the path. |
+
+Example:
+
+```bash
+python3 ~/myc280_ws/random_collision_test.py --ros-args -p speed:=0.3 -p limit_ratio:=0.8
+```
+
+---
+
+## 6. Project Structure
+
+```text
+myc280_ws/
+├── src/
+│   ├── limo_description/      # LIMO + myCobot URDF/xacro, launch, RViz configs
+│   ├── mycobot_description/   # myCobot 280 URDF and meshes
+│   ├── myc280_moveit_config/  # MoveIt config (generated with Setup Assistant)
+│   ├── limo_car/              # LIMO simulation models and worlds
+│   ├── limo_base/             # LIMO base driver
+│   ├── limo_bringup/          # Bringup, navigation and mapping
+│   ├── limo_autonomy/         # Autonomy and grasping nodes
+│   ├── limo_kinematics/       # LIMO kinematics tools
+│   ├── limo_localization/     # EKF and RTAB-Map localization
+│   ├── limo_interfaces/       # Custom actions
+│   └── limo_msgs/             # Custom messages
+├── random_collision_test.py   # Random pose collision test
+├── docs/ docker/ saha/        # Documentation, container files, field tools
+└── README.md
+```
+
+---
+
+## 7. Troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| `AMENT_PREFIX_PATH` lists another workspace | Open a new terminal and source only `/opt/ros/humble` and `myc280_ws`. |
+| RViz shows `No tf data` for Fixed Frame | Set Fixed Frame to `base_footprint` (or `world` with the virtual joint). Make sure `/joint_states` is being published. |
+| RobotModel shows an error | Set *Description Topic -> Durability Policy* to `Transient Local`. |
+| `/joint_states` has no publisher | The demo has no controllers. Run the test with `fake:=true`, or add a ROS 2 control hardware interface in the Setup Assistant. |
+| No red links on collision | Untick *Use Collision-Aware IK*, check the collision matrix in `myc280_moveit_config/config/*.srdf`. |
+| Gazebo hangs on exit | `pkill -f gzserver; pkill -f gzclient` |
+
+---
+
+## 8. Credits
+
+- Base workspace: [HSGunes/limo_ws](https://github.com/HSGunes/limo_ws)
+- Robot: [Elephant Robotics myCobot 280](https://www.elephantrobotics.com/en/mycobot-280-pi-en/)
