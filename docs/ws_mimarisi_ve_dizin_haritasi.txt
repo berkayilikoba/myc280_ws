@@ -1,0 +1,1026 @@
+=== MYC280_WS ROS2 ÇALIŞMA ALANI VE DİZİN HARİTASI ===
+Tarih: 2026-11-21 20:55:56
+Çalışma Dizini: /home/berkay/myc280_ws
+
+=== 1. DİZİN AĞACI (DERİNLİK 3, DERLEME/LOG/ÖNBELLEK HARİÇ) ===
+.
+./docker
+./docker/99-limo.rules
+./docker/docker-compose.yml
+./docker/Dockerfile.jetson
+./docker/dockerignore.txt
+./docker/entrypoint.sh
+./docker/README.md
+./docs
+./docs/gece_raporu_2026-09-23.md
+./docs/gorsel_odometri.md
+./docs/kamera_karsilastirma.md
+./docs/kamera_testleri.md
+./docs/kavrama_yaklasim_ornek.png
+./docs/nav_kavrama.md
+./docs/oda_3b.md
+./docs/odom_analizi.md
+./docs/olcum_protokolu.md
+./docs/prompts
+./docs/prompts/random_collision_test_prompts.txt
+./docs/robot_baglanti_rehberi.md
+./docs/sensor_modeli.md
+./docs/sim_gercek.md
+./docs/sim_real
+./docs/sim_real/derinlik_baslangic.png
+./docs/sim_real/lidar_baslangic.png
+./docs/sim_real/RAPOR.md
+./docs/sim_real/sim_real_fark.yaml
+./docs/sim_real/yorunge.png
+./docs/ws_mimarisi_ve_dizin_haritasi.txt
+./README_limo.md
+./README.md
+./saha
+./saha/analiz
+./saha/analiz/amcl_olc.py
+./saha/analiz/amcl_tekrar.sh
+./saha/analiz/bag2vlmaps.py
+./saha/analiz/charuco_kalib.py
+./saha/analiz/derinlik_karakter.py
+./saha/analiz/donus_analiz.py
+./saha/analiz/duvar_analiz.py
+./saha/analiz/etiket_degerlendir.py
+./saha/analiz/etiket_sablonu.py
+./saha/analiz/gecikme_ara.py
+./saha/analiz/hedef_mesafe.py
+./saha/analiz/icp_ardisik.py
+./saha/analiz/icp_fonk.py
+./saha/analiz/icp_karsilastir.py
+./saha/analiz/kalib_harita.py
+./saha/analiz/kol_erisim.py
+./saha/analiz/lidar_kalibrasyon.py
+./saha/analiz/lidar_poz.py
+./saha/analiz/odom_saglik.py
+./saha/analiz/sabit_hiza.py
+./saha/analiz/scan_cek.py
+./saha/analiz/sim_param_cikar.py
+./saha/analiz/taban_uydur.py
+./saha/analiz/tf_suz.py
+./saha/analiz/vlmaps_calistir.py
+./saha/analiz/vlmaps_dogrula.py
+./saha/analiz/vlmaps_hedef.py
+./saha/analiz/vlmaps_karsilastir.py
+./saha/analiz/vo
+./saha/analiz/yogun_harita.py
+./saha/analiz/zemin_egimi.py
+./saha/araclar
+./saha/araclar/AJAN.md
+./saha/araclar/ajan_paket
+./saha/araclar/ajan.py
+./saha/araclar/GOREV_AGY.md
+./saha/araclar/GOREV_AJAN2b.md
+./saha/araclar/GOREV_AJAN2.md
+./saha/araclar/GOREV_AJAN.md
+./saha/araclar/GOREV_DOGRULA.md
+./saha/araclar/GOREV_PAKET.md
+./saha/araclar/test_ajan.py
+./saha/baslangica_don.py
+./saha/config
+./saha/config/fastdds_udp.xml
+./saha/config/kamera_kalibrasyon_d435.yaml
+./saha/config/kamera_kalibrasyon.yaml
+./saha/config/kamera_qos.yaml
+./saha/config/kol_erisim.yaml
+./saha/config/nav2_limo_gercek_025.yaml
+./saha/config/nav2_limo_gercek.yaml
+./saha/config/oda_etiket_sablon.png
+./saha/config/oda_etiket.yaml
+./saha/config/sensor_qos.yaml
+./saha/config/sim_gercek_param.yaml
+./saha/config/slam_limo_v3.yaml
+./saha/config/tmini_ros2.yaml
+./saha/dikdortgen.py
+./saha/dikdortgen_tur.sh
+./saha/donus_testi.py
+./saha/drive_yukle.sh
+./saha/duvar_testi.py
+./saha/gece
+./saha/gece/algi_kaydedici.py
+./saha/gece/algi_sim_test.sh
+./saha/gece/bati_dar_tekrar.yaml
+./saha/gece/bekle_aktif.py
+./saha/gece/costmap_anlik.py
+./saha/gece/DEVIR.md
+./saha/gece/durum_kontrol.sh
+./saha/gece/engel_sim_test.sh
+./saha/gece/F1_odom_stres.md
+./saha/gece/F2_renk_algi.md
+./saha/gece/F3_dinamik_engel.md
+./saha/gece/F5_pil.md
+./saha/gece/F6_dinamik_iyilestirme.md
+./saha/gece/F7_algi_entegrasyon.md
+./saha/gece/G1_eylem.md
+./saha/gece/G2_gorsel.md
+./saha/gece/G2_RAPOR.md
+./saha/gece/G3_belge.md
+./saha/gece/gorev_sim_test.sh
+./saha/gece/ilk_poz.py
+./saha/gece/insan_gecir.py
+./saha/gece/kalkan_oynat.py
+./saha/gece/kavrama_kalkan_sim_test.sh
+./saha/gece/kuzeydogu_tekrar.yaml
+./saha/gece/N15_erken_kabul.md
+./saha/gece/N16_hareketli_kalkan.md
+./saha/gece/N17_kenar_aykiri.md
+./saha/gece/N18_belge.md
+./saha/gece/N19_kalkan_yanlis_alarm.md
+./saha/gece/N20_uzak_derinlik.md
+./saha/gece/N21_kalkan_sertlestirme.md
+./saha/gece/N22_sapma_yeniden_hedef.md
+./saha/gece/N23_belge.md
+./saha/gece/N24_kavrama_kalkan.md
+./saha/gece/N25_kalkan_eslesme.md
+./saha/gece/N26_kalkan_harita_cikarimi.md
+./saha/gece/N27_stvl.md
+./saha/gece/ORTAK.md
+./saha/gece/OZET_2026-10-28.md
+./saha/gece/R1_kalkan_inceleme.md
+./saha/gece/R1_RAPOR.md
+./saha/gece/R2_algi_sapma.md
+./saha/gece/R2_RAPOR.md
+./saha/gece/shm_temizle.sh
+./saha/gece/test_odom_stres.py
+./saha/gece/tur_sim_test.sh
+./saha/harita_baslat.sh
+./saha/harita_bitir.sh
+./saha/haritalar
+./saha/haritalar/oda_20261009
+./saha/hedefe_git.py
+./saha/kalibrasyon
+./saha/kalibrasyon/analiz.py
+./saha/kalibrasyon/donus_360.py
+./saha/kalibrasyon/geri_git.py
+./saha/kalibrasyon/ileri_geri.py
+./saha/kalibrasyon/t1_t2_test.py
+./saha/kamera_ayar_testi.sh
+./saha/kamera_baslat.sh
+./saha/kamera_dur.sh
+./saha/kapsama_turu.py
+./saha/kayit_baslat.sh
+./saha/kayit_bitir.sh
+./saha/nav
+./saha/nav_baslat.sh
+./saha/nav_dur.sh
+./saha/nav/GOREV_N10.md
+./saha/nav/GOREV_N11.md
+./saha/nav/GOREV_N12.md
+./saha/nav/GOREV_N13.md
+./saha/nav/GOREV_N14b.md
+./saha/nav/GOREV_N14.md
+./saha/nav/GOREV_N2b.md
+./saha/nav/GOREV_N2.md
+./saha/nav/GOREV_N3.md
+./saha/nav/GOREV_N4.md
+./saha/nav/GOREV_N5.md
+./saha/nav/GOREV_N6.md
+./saha/nav/GOREV_N7.md
+./saha/nav/GOREV_N8.md
+./saha/nav/GOREV_N9.md
+./saha/nav/kavrama_sim_test.sh
+./saha/nav/ORTAK.md
+./saha/oda
+./saha/oda/GOREV_A.md
+./saha/oda/GOREV_B2.md
+./saha/oda/GOREV_B.md
+./saha/oda/GOREV_C.md
+./saha/oda/GOREV_D.md
+./saha/oda/GOREV_E.md
+./saha/oda/GOREV_F.md
+./saha/oda/GOREV_G1.md
+./saha/oda/GOREV_G2.md
+./saha/oda/GOREV_G3.md
+./saha/oda/GOREV_G4.md
+./saha/oda/GOREV_H1.md
+./saha/oda/GOREV_H2.md
+./saha/oda/GOREV_H3.md
+./saha/oda/GOREV_I1.md
+./saha/oda/GOREV_I2.md
+./saha/oda/GOREV_J1.md
+./saha/oda/GOREV_J2.md
+./saha/oda/GOREV_J3.md
+./saha/oda/GOREV_K1.md
+./saha/oda/GOREV_K2.md
+./saha/oda/GOREV_L1.md
+./saha/oda/GOREV_M1.md
+./saha/oda/GOREV_N1.md
+./saha/oda/isik_dene.sh
+./saha/oda/mesh_karsilastir.py
+./saha/oda/oda_dogrula.py
+./saha/oda/oda_doku.py
+./saha/oda/oda_dunya.py
+./saha/oda/oda_kur.sh
+./saha/oda/oda_tavan.py
+./saha/oda/oda_tsdf.py
+./saha/oda/oda_yapi.py
+./saha/oda/renk_karakter.py
+./saha/oda/sim_ac.sh
+./saha/oda/sim_kabul.py
+./saha/oda/test_oda.py
+./saha/oda/test_renk_bozu.py
+./saha/ortam.sh
+./saha/poz_ver.sh
+./saha/README.md
+./saha/robot
+./saha/robot/kamera_sikistir.py
+./saha/robot/odom_duzelt.py
+./saha/scan_sabitle.py
+./saha/sim_dikdortgen.sh
+./src
+./src/limo_autonomy
+./src/limo_autonomy/config
+./src/limo_autonomy/launch
+./src/limo_autonomy/limo_autonomy
+./src/limo_autonomy/package.xml
+./src/limo_autonomy/resource
+./src/limo_autonomy/setup.cfg
+./src/limo_autonomy/setup.py
+./src/limo_autonomy/test
+./src/limo_base
+./src/limo_base/CMakeLists.txt
+./src/limo_base/include
+./src/limo_base/package.xml
+./src/limo_base/src
+./src/limo_base/test
+./src/limo_bringup
+./src/limo_bringup/behavior_trees
+./src/limo_bringup/CMakeLists.txt
+./src/limo_bringup/config
+./src/limo_bringup/launch
+./src/limo_bringup/maps
+./src/limo_bringup/package.xml
+./src/limo_bringup/param
+./src/limo_bringup/scripts
+./src/limo_car
+./src/limo_car/CMakeLists.txt
+./src/limo_car/gazebo
+./src/limo_car/launch
+./src/limo_car/meshes
+./src/limo_car/models
+./src/limo_car/package.xml
+./src/limo_car/rviz
+./src/limo_car/worlds
+./src/limo_description
+./src/limo_description/CMakeLists.txt
+./src/limo_description/launch
+./src/limo_description/meshes
+./src/limo_description/package.xml
+./src/limo_description/rviz
+./src/limo_description/urdf
+./src/limo_interfaces
+./src/limo_interfaces/action
+./src/limo_interfaces/CMakeLists.txt
+./src/limo_interfaces/package.xml
+./src/limo_interfaces/README.md
+./src/limo_kinematics
+./src/limo_kinematics/limo_kinematics
+./src/limo_kinematics/package.xml
+./src/limo_kinematics/resource
+./src/limo_kinematics/setup.cfg
+./src/limo_kinematics/setup.py
+./src/limo_kinematics/test
+./src/limo_localization
+./src/limo_localization/config
+./src/limo_localization/launch
+./src/limo_localization/LICENSE
+./src/limo_localization/limo_localization
+./src/limo_localization/package.xml
+./src/limo_localization/resource
+./src/limo_localization/setup.cfg
+./src/limo_localization/setup.py
+./src/limo_localization/test
+./src/limo_msgs
+./src/limo_msgs/CMakeLists.txt
+./src/limo_msgs/msg
+./src/limo_msgs/package.xml
+./src/myc280_moveit_config
+./src/myc280_moveit_config/CMakeLists.txt
+./src/myc280_moveit_config/config
+./src/myc280_moveit_config/launch
+./src/myc280_moveit_config/package.xml
+./src/myc280_sim
+./src/myc280_sim/config
+./src/myc280_sim/myc280_sim
+./src/myc280_sim/package.xml
+./src/myc280_sim/resource
+./src/myc280_sim/scripts
+./src/myc280_sim/setup.cfg
+./src/myc280_sim/setup.py
+./src/myc280_sim/test
+./src/mycobot_description
+./src/mycobot_description/CMakeLists.txt
+./src/mycobot_description/package.xml
+./src/mycobot_description/urdf
+
+=== 2. SRC PAKET VE KOD/YAPILANDIRMA DOSYALARI ===
+src/limo_autonomy/config/nesneler_lab_oda.yaml
+src/limo_autonomy/config/sim_patrol_ackermann.yaml
+src/limo_autonomy/config/sim_patrol.yaml
+src/limo_autonomy/launch/kavrama.launch.py
+src/limo_autonomy/launch/patrol.launch.py
+src/limo_autonomy/limo_autonomy/gorev_dugumu.py
+src/limo_autonomy/limo_autonomy/gorev_yoneticisi.py
+src/limo_autonomy/limo_autonomy/hareketli_kalkan.py
+src/limo_autonomy/limo_autonomy/__init__.py
+src/limo_autonomy/limo_autonomy/kavrama_dugumu.py
+src/limo_autonomy/limo_autonomy/kavrama_gorsel.py
+src/limo_autonomy/limo_autonomy/kavrama_yaklasim.py
+src/limo_autonomy/limo_autonomy/mission.py
+src/limo_autonomy/limo_autonomy/patrol_node.py
+src/limo_autonomy/limo_autonomy/renk_algi.py
+src/limo_autonomy/limo_autonomy/sahte_algi.py
+src/limo_autonomy/limo_autonomy/son_yaklasma.py
+src/limo_autonomy/package.xml
+src/limo_autonomy/setup.py
+src/limo_autonomy/test/test_gorev_yoneticisi.py
+src/limo_autonomy/test/test_hareketli_kalkan.py
+src/limo_autonomy/test/test_kavra_eylem.py
+src/limo_autonomy/test/test_kavrama_dugumu.py
+src/limo_autonomy/test/test_kavrama_gorsel.py
+src/limo_autonomy/test/test_kavrama_yaklasim.py
+src/limo_autonomy/test/test_mission.py
+src/limo_autonomy/test/test_renk_algi.py
+src/limo_autonomy/test/test_sahte_algi.py
+src/limo_autonomy/test/test_son_yaklasma.py
+src/limo_base/CMakeLists.txt
+src/limo_base/package.xml
+src/limo_bringup/CMakeLists.txt
+src/limo_bringup/launch/limo_nav2.launch.py
+src/limo_bringup/launch/limon_teletop_keyboard.launch.py
+src/limo_bringup/launch/limo_sim_nav2.launch.py
+src/limo_bringup/launch/limo_start.launch.py
+src/limo_bringup/maps/lab_oda.yaml
+src/limo_bringup/maps/sim_world.yaml
+src/limo_bringup/package.xml
+src/limo_bringup/param/ekf.yaml
+src/limo_bringup/param/nav2_ackermann.yaml
+src/limo_bringup/param/nav2_diff.yaml
+src/limo_bringup/param/slam_toolbox_limo.yaml
+src/limo_bringup/param/ydlidar_tmini.yaml
+src/limo_bringup/scripts/bench_summary.py
+src/limo_bringup/scripts/diff_openloop.py
+src/limo_bringup/scripts/dinamik_engel.py
+src/limo_bringup/scripts/dinamik_engel_senaryolar.yaml
+src/limo_bringup/scripts/harita_dunya.py
+src/limo_bringup/scripts/kavrama_bench.py
+src/limo_bringup/scripts/kavrama_hedefler_lab_oda.yaml
+src/limo_bringup/scripts/make_variant.py
+src/limo_bringup/scripts/nav_bench.py
+src/limo_bringup/scripts/nav_tur_lab_oda.yaml
+src/limo_bringup/scripts/openloop_test.py
+src/limo_bringup/scripts/sensor_olc.py
+src/limo_bringup/scripts/sim_ikiz.py
+src/limo_bringup/scripts/sim_real_fark.py
+src/limo_bringup/scripts/steer_step.py
+src/limo_bringup/scripts/test_dinamik_engel.py
+src/limo_bringup/scripts/video_recorder.py
+src/limo_bringup/scripts/world_to_map.py
+src/limo_car/CMakeLists.txt
+src/limo_car/gazebo/ackermann_with_sensor.xacro
+src/limo_car/gazebo/ackermann.xacro
+src/limo_car/gazebo/sensor.xacro
+src/limo_car/launch/ackermann_gazebo.launch.py
+src/limo_car/launch/ackermann.launch.py
+src/limo_car/launch/display_ackermann.launch.py
+src/limo_car/package.xml
+src/limo_description/CMakeLists.txt
+src/limo_description/launch/display_limo_mycobot.launch.py
+src/limo_description/launch/gazebo_limo_mycobot.launch.py
+src/limo_description/package.xml
+src/limo_description/urdf/limo_d435.xacro
+src/limo_description/urdf/limo_four_diff.xacro
+src/limo_description/urdf/limo_mycobot.xacro
+src/limo_description/urdf/limo_xacro.xacro
+src/limo_interfaces/CMakeLists.txt
+src/limo_interfaces/package.xml
+src/limo_kinematics/limo_kinematics/ackermann_cmd_adapter.py
+src/limo_kinematics/limo_kinematics/cli.py
+src/limo_kinematics/limo_kinematics/footprint.py
+src/limo_kinematics/limo_kinematics/geometry.py
+src/limo_kinematics/limo_kinematics/__init__.py
+src/limo_kinematics/limo_kinematics/kinematics.py
+src/limo_kinematics/limo_kinematics/renk_bozu.py
+src/limo_kinematics/limo_kinematics/report.py
+src/limo_kinematics/limo_kinematics/sensor_modeli_dugumu.py
+src/limo_kinematics/limo_kinematics/taban_modeli_dugumu.py
+src/limo_kinematics/limo_kinematics/taban_modeli.py
+src/limo_kinematics/package.xml
+src/limo_kinematics/setup.py
+src/limo_kinematics/test/fixtures/limo_car_sim_ackermann.urdf
+src/limo_kinematics/test/fixtures/limo_description_ackermann.urdf
+src/limo_kinematics/test/test_kinematics.py
+src/limo_kinematics/test/test_sensor_modeli.py
+src/limo_kinematics/test/test_taban_modeli.py
+src/limo_kinematics/test/test_twist_steering.py
+src/limo_kinematics/test/test_urdf_consistency.py
+src/limo_localization/config/ekf_robot.yaml
+src/limo_localization/config/ekf_sim.yaml
+src/limo_localization/launch/ekf.launch.py
+src/limo_localization/launch/rtabmap_rgbd.launch.py
+src/limo_localization/limo_localization/donus_hatasi.py
+src/limo_localization/limo_localization/drive_pattern.py
+src/limo_localization/limo_localization/__init__.py
+src/limo_localization/package.xml
+src/limo_localization/setup.py
+src/limo_localization/test/test_drive_pattern.py
+src/limo_localization/test/test_flake8.py
+src/limo_localization/test/test_pep257.py
+src/limo_msgs/CMakeLists.txt
+src/limo_msgs/package.xml
+src/myc280_moveit_config/CMakeLists.txt
+src/myc280_moveit_config/config/initial_positions.yaml
+src/myc280_moveit_config/config/joint_limits.yaml
+src/myc280_moveit_config/config/kinematics.yaml
+src/myc280_moveit_config/config/limo_mycobot.ros2_control.xacro
+src/myc280_moveit_config/config/limo_mycobot.srdf
+src/myc280_moveit_config/config/limo_mycobot.urdf.xacro
+src/myc280_moveit_config/config/moveit_controllers.yaml
+src/myc280_moveit_config/config/pilz_cartesian_limits.yaml
+src/myc280_moveit_config/config/ros2_controllers.yaml
+src/myc280_moveit_config/launch/demo.launch.py
+src/myc280_moveit_config/launch/move_group.launch.py
+src/myc280_moveit_config/launch/moveit_rviz.launch.py
+src/myc280_moveit_config/launch/rsp.launch.py
+src/myc280_moveit_config/launch/setup_assistant.launch.py
+src/myc280_moveit_config/launch/spawn_controllers.launch.py
+src/myc280_moveit_config/launch/static_virtual_joint_tfs.launch.py
+src/myc280_moveit_config/launch/warehouse_db.launch.py
+src/myc280_moveit_config/package.xml
+src/myc280_sim/myc280_sim/__init__.py
+src/myc280_sim/package.xml
+src/myc280_sim/scripts/cube_approach.py
+src/myc280_sim/scripts/random_collision_test.py
+src/myc280_sim/setup.py
+src/myc280_sim/test/test_copyright.py
+src/myc280_sim/test/test_flake8.py
+src/myc280_sim/test/test_pep257.py
+src/mycobot_description/CMakeLists.txt
+src/mycobot_description/package.xml
+src/mycobot_description/urdf/mycobot/mycobot.urdf.xacro
+
+=== 3. DOCS VE SAHA DOSYA LİSTESİ ===
+docs
+docs/gece_raporu_2026-09-23.md
+docs/gorsel_odometri.md
+docs/kamera_karsilastirma.md
+docs/kamera_testleri.md
+docs/kavrama_yaklasim_ornek.png
+docs/nav_kavrama.md
+docs/oda_3b.md
+docs/odom_analizi.md
+docs/olcum_protokolu.md
+docs/prompts
+docs/prompts/random_collision_test_prompts.txt
+docs/robot_baglanti_rehberi.md
+docs/sensor_modeli.md
+docs/sim_gercek.md
+docs/sim_real
+docs/sim_real/derinlik_baslangic.png
+docs/sim_real/lidar_baslangic.png
+docs/sim_real/RAPOR.md
+docs/sim_real/sim_real_fark.yaml
+docs/sim_real/yorunge.png
+docs/ws_mimarisi_ve_dizin_haritasi.txt
+saha
+saha/analiz
+saha/analiz/amcl_olc.py
+saha/analiz/amcl_tekrar.sh
+saha/analiz/bag2vlmaps.py
+saha/analiz/charuco_kalib.py
+saha/analiz/derinlik_karakter.py
+saha/analiz/donus_analiz.py
+saha/analiz/duvar_analiz.py
+saha/analiz/etiket_degerlendir.py
+saha/analiz/etiket_sablonu.py
+saha/analiz/gecikme_ara.py
+saha/analiz/hedef_mesafe.py
+saha/analiz/icp_ardisik.py
+saha/analiz/icp_fonk.py
+saha/analiz/icp_karsilastir.py
+saha/analiz/kalib_harita.py
+saha/analiz/kol_erisim.py
+saha/analiz/lidar_kalibrasyon.py
+saha/analiz/lidar_poz.py
+saha/analiz/odom_saglik.py
+saha/analiz/sabit_hiza.py
+saha/analiz/scan_cek.py
+saha/analiz/sim_param_cikar.py
+saha/analiz/taban_uydur.py
+saha/analiz/tf_suz.py
+saha/analiz/vlmaps_calistir.py
+saha/analiz/vlmaps_dogrula.py
+saha/analiz/vlmaps_hedef.py
+saha/analiz/vlmaps_karsilastir.py
+saha/analiz/vo
+saha/analiz/vo/degerlendir.py
+saha/analiz/vo/fuzyon.py
+saha/analiz/vo/ortak.py
+saha/analiz/vo/oz_kalibrasyon.py
+saha/analiz/vo/referans.py
+saha/analiz/vo/vo_ozellik.py
+saha/analiz/vo/vo_yogun.py
+saha/analiz/yogun_harita.py
+saha/analiz/zemin_egimi.py
+saha/araclar
+saha/araclar/AJAN.md
+saha/araclar/ajan_paket
+saha/araclar/ajan_paket/ajan.py
+saha/araclar/ajan_paket/examples
+saha/araclar/ajan_paket/pyproject.toml
+saha/araclar/ajan_paket/README.md
+saha/araclar/ajan_paket/README.tr.md
+saha/araclar/ajan.py
+saha/araclar/GOREV_AGY.md
+saha/araclar/GOREV_AJAN2b.md
+saha/araclar/GOREV_AJAN2.md
+saha/araclar/GOREV_AJAN.md
+saha/araclar/GOREV_DOGRULA.md
+saha/araclar/GOREV_PAKET.md
+saha/araclar/test_ajan.py
+saha/baslangica_don.py
+saha/config
+saha/config/fastdds_udp.xml
+saha/config/kamera_kalibrasyon_d435.yaml
+saha/config/kamera_kalibrasyon.yaml
+saha/config/kamera_qos.yaml
+saha/config/kol_erisim.yaml
+saha/config/nav2_limo_gercek_025.yaml
+saha/config/nav2_limo_gercek.yaml
+saha/config/oda_etiket_sablon.png
+saha/config/oda_etiket.yaml
+saha/config/sensor_qos.yaml
+saha/config/sim_gercek_param.yaml
+saha/config/slam_limo_v3.yaml
+saha/config/tmini_ros2.yaml
+saha/dikdortgen.py
+saha/dikdortgen_tur.sh
+saha/donus_testi.py
+saha/drive_yukle.sh
+saha/duvar_testi.py
+saha/gece
+saha/gece/algi_kaydedici.py
+saha/gece/algi_sim_test.sh
+saha/gece/bati_dar_tekrar.yaml
+saha/gece/bekle_aktif.py
+saha/gece/costmap_anlik.py
+saha/gece/DEVIR.md
+saha/gece/durum_kontrol.sh
+saha/gece/engel_sim_test.sh
+saha/gece/F1_odom_stres.md
+saha/gece/F2_renk_algi.md
+saha/gece/F3_dinamik_engel.md
+saha/gece/F5_pil.md
+saha/gece/F6_dinamik_iyilestirme.md
+saha/gece/F7_algi_entegrasyon.md
+saha/gece/G1_eylem.md
+saha/gece/G2_gorsel.md
+saha/gece/G2_RAPOR.md
+saha/gece/G3_belge.md
+saha/gece/gorev_sim_test.sh
+saha/gece/ilk_poz.py
+saha/gece/insan_gecir.py
+saha/gece/kalkan_oynat.py
+saha/gece/kavrama_kalkan_sim_test.sh
+saha/gece/kuzeydogu_tekrar.yaml
+saha/gece/N15_erken_kabul.md
+saha/gece/N16_hareketli_kalkan.md
+saha/gece/N17_kenar_aykiri.md
+saha/gece/N18_belge.md
+saha/gece/N19_kalkan_yanlis_alarm.md
+saha/gece/N20_uzak_derinlik.md
+saha/gece/N21_kalkan_sertlestirme.md
+saha/gece/N22_sapma_yeniden_hedef.md
+saha/gece/N23_belge.md
+saha/gece/N24_kavrama_kalkan.md
+saha/gece/N25_kalkan_eslesme.md
+saha/gece/N26_kalkan_harita_cikarimi.md
+saha/gece/N27_stvl.md
+saha/gece/ORTAK.md
+saha/gece/OZET_2026-10-28.md
+saha/gece/R1_kalkan_inceleme.md
+saha/gece/R1_RAPOR.md
+saha/gece/R2_algi_sapma.md
+saha/gece/R2_RAPOR.md
+saha/gece/shm_temizle.sh
+saha/gece/test_odom_stres.py
+saha/gece/tur_sim_test.sh
+saha/harita_baslat.sh
+saha/harita_bitir.sh
+saha/haritalar
+saha/haritalar/oda_20261009
+saha/haritalar/oda_20261009/harita.pgm
+saha/haritalar/oda_20261009/harita.yaml
+saha/hedefe_git.py
+saha/kalibrasyon
+saha/kalibrasyon/analiz.py
+saha/kalibrasyon/donus_360.py
+saha/kalibrasyon/geri_git.py
+saha/kalibrasyon/ileri_geri.py
+saha/kalibrasyon/t1_t2_test.py
+saha/kamera_ayar_testi.sh
+saha/kamera_baslat.sh
+saha/kamera_dur.sh
+saha/kapsama_turu.py
+saha/kayit_baslat.sh
+saha/kayit_bitir.sh
+saha/nav
+saha/nav_baslat.sh
+saha/nav_dur.sh
+saha/nav/GOREV_N10.md
+saha/nav/GOREV_N11.md
+saha/nav/GOREV_N12.md
+saha/nav/GOREV_N13.md
+saha/nav/GOREV_N14b.md
+saha/nav/GOREV_N14.md
+saha/nav/GOREV_N2b.md
+saha/nav/GOREV_N2.md
+saha/nav/GOREV_N3.md
+saha/nav/GOREV_N4.md
+saha/nav/GOREV_N5.md
+saha/nav/GOREV_N6.md
+saha/nav/GOREV_N7.md
+saha/nav/GOREV_N8.md
+saha/nav/GOREV_N9.md
+saha/nav/kavrama_sim_test.sh
+saha/nav/ORTAK.md
+saha/oda
+saha/oda/GOREV_A.md
+saha/oda/GOREV_B2.md
+saha/oda/GOREV_B.md
+saha/oda/GOREV_C.md
+saha/oda/GOREV_D.md
+saha/oda/GOREV_E.md
+saha/oda/GOREV_F.md
+saha/oda/GOREV_G1.md
+saha/oda/GOREV_G2.md
+saha/oda/GOREV_G3.md
+saha/oda/GOREV_G4.md
+saha/oda/GOREV_H1.md
+saha/oda/GOREV_H2.md
+saha/oda/GOREV_H3.md
+saha/oda/GOREV_I1.md
+saha/oda/GOREV_I2.md
+saha/oda/GOREV_J1.md
+saha/oda/GOREV_J2.md
+saha/oda/GOREV_J3.md
+saha/oda/GOREV_K1.md
+saha/oda/GOREV_K2.md
+saha/oda/GOREV_L1.md
+saha/oda/GOREV_M1.md
+saha/oda/GOREV_N1.md
+saha/oda/isik_dene.sh
+saha/oda/mesh_karsilastir.py
+saha/oda/oda_dogrula.py
+saha/oda/oda_doku.py
+saha/oda/oda_dunya.py
+saha/oda/oda_kur.sh
+saha/oda/oda_tavan.py
+saha/oda/oda_tsdf.py
+saha/oda/oda_yapi.py
+saha/oda/renk_karakter.py
+saha/oda/sim_ac.sh
+saha/oda/sim_kabul.py
+saha/oda/test_oda.py
+saha/oda/test_renk_bozu.py
+saha/ortam.sh
+saha/poz_ver.sh
+saha/README.md
+saha/robot
+saha/robot/kamera_sikistir.py
+saha/robot/odom_duzelt.py
+saha/scan_sabitle.py
+saha/sim_dikdortgen.sh
+
+=== 4. DOCS BAŞLIK / İLK SATIRLAR ===
+--- docs/gece_raporu_2026-09-23.md ---
+# LIMO: Gece Çalışması Raporu (23 Eylül 2026, 02:10–08:00)
+
+## Özet
+
+| | Gece başı | Sabah |
+|---|---|---|
+| Diff, nav_bench (6 hedef × 3 tur) | 18/18 | **18/18** (açıklık arttı) |
+| Ackermann, nav_bench | **2/12** | **16/18** (%89) |
+| Diff devriye, AMCL (2 tur + eve dönüş) | yok | **8/8 + ev** (2/2 koşu, biri son yapılandırmayla) |
+| Diff devriye, SLAM | yok | **8/8 + ev** (2/2 koşu) |
+| Ackermann devriye, AMCL, döngü görevi | yok | **8/8 + ev** (2/2 koşu) |
+| Ackermann devriye, SLAM | yok | **0/2**: SLAM kayması (açık sorun 2) |
+| Jetson Docker (Humble, L4T r35) | yok | dosyalar hazır, **derlenmedi** |
+
+Hepsi simülasyon (Gazebo 11, headless; AMCL + bilinen harita ya da SLAM). Gerçek robotta henüz hiçbir şey denenmedi.
+
+## Bulunan kök nedenler (sırayla, hepsi ölçümle)
+
+1. **Sim direksiyonunun anlamı** (gece öncesi bulundu): gazebo_ros_ackermann_drive `angular.z`'yi direksiyon açısı olarak
+   alıyor, Nav2 ve gerçek sürücü ise yaw hızı gönderiyor. Çözüm: `limo_kinematics/ackermann_cmd_adapter`.
+
+--- docs/gorsel_odometri.md ---
+# Görsel odometri — dikdörtgen tur kayıtları üzerinde denemeler (28.10.2026)
+
+Amaç: kamera kayıtlarından EKF'ten (`/odom` vx + `/imu` yönü, `ekf_robot.yaml`) daha doğru bir odometri üretmek.
+Kod `saha/analiz/vo/`, ara çıktılar `bags/vo_calisma/<koşu>/` (sensör önbelleği, referans, yörüngeler).
+
+## Veri
+
+| koşu | kayıt | kamera | not |
+|---|---|---|---|
+| `dabai_0910a` | `LIMO_2026-10-09_dikdortgen/bag/kamera_tur_20261009_122158` | Orbbec Dabai, renk ~20 Hz | |
+| `dabai_0910b` | `LIMO_2026-10-09_dikdortgen_lidarduz/bag/dikdortgen_20261009_162849` | Dabai, renk 27 Hz | |
+| `d435_1015` | `LIMO_2026-10-15_dikdortgen_realsense/bag/dikdortgen_rs_20261015_133037` | RealSense D435, renk ~12 Hz | EKF ile sürüldü |
+
+İki Dabai kaydının kamera `.db3` dosyaları `bags/kamera_0-001.db3` (→ 0910b) ve `bags/kamera_0-002.db3` (→ 0910a)
+olarak klasör dışındaydı (zaman damgalarıyla eşlendi); kayıt klasörlerine `kamera_0.db3` sembolik bağı eklendi.
+
+## Referans ve ölçütler
+
+`vo/referans.py`: her lidar taraması `LIMO_2026-10-09_dikdortgen_lidarduz/harita` haritasına 2B nokta-doğru ICP ile
+oturtulur (lidar dış kalibrasyonu 0.137, 0.015 m, −9.66°). Üç koşuda da reddedilen tarama yok, eşleşme medyanı
+
+--- docs/kamera_karsilastirma.md ---
+# Derinlik kamerası karşılaştırması: Orbbec Dabai DC1 ↔ Intel RealSense D435 (LIMO, VLMaps için)
+
+Aynı robot (LIMO, Orin Nano), aynı oda, aynı başlangıç işareti (lidar sol 1.854 / 1.859 m, sağ 0.705 / 0.718 m),
+aynı betikler (`docs/kamera_testleri.md`). Dabai: 13.10.2026, D435: 14.10.2026 (USB 3.2, doğrudan Jetson'a).
+Kamera aynı yuvada: optik merkez yerden ikisinde de 17.8 cm.
+
+## 1. Kurulum ve akış
+
+| | Dabai DC1 | D435 |
+|---|---|---|
+| Bağlantı | USB 2 (yeterli) | **USB 3 şart** (hub üzerinden USB 2'de 480 Mbps'ye düştü; Jetson'ın mavi portuna taşındı) |
+| Sürücü (Foxy) | `orbbec_camera` dabai.launch.py | `realsense2_camera` 4.51.1 (`realsense2_camera_node`) |
+| Derinlik | 640×400 16UC1 mm, yapılandırılmış ışık | 640×480 16UC1 mm (848×480 önerilen), aktif stereo |
+| Renk | 640×480 | 640×480 |
+| Kayıtta hız (tur) | derinlik 29.1–30.0, renk 25.8–27.3 Hz | derinlik 29.1–29.7, **renk 29.5–29.8 Hz** |
+| Renk-derinlik damgası | ayrı (fark 7–12 ms) | **aynı damga** (fark 0) |
+| Donanım hizası | kamerada (`depth_registration`), 30 Hz kalır | **sürücüde, Jetson CPU'sunda: 20 Hz'e düşer, σ bozulur → kullanılmamalı** |
+| Kalibrasyon (zemin) | pitch −1.42°, roll +0.43°, RMS 3 mm | pitch −1.09°, roll +0.09°, RMS 2.1 mm |
+
+## 2. Sabit sahne (başlangıç işareti, 8 s) — `derinlik_karakter.py`
+
+--- docs/kamera_testleri.md ---
+# Derinlik kamerası testleri (Orbbec Dabai DC1 → D435 karşılaştırması)
+
+Aynı oda, aynı robot, aynı betikler: D435 takıldığında aşağıdaki testler aynı komutlarla tekrarlanır ve
+sonuç tabloları yan yana konur. Tüm kayıtlar robotun diskine (`kayit_baslat.sh`), sonra PC → Drive.
+
+## Ön koşul
+
+```bash
+SURE=5400 saha/nav_baslat.sh ~/limo_veri/oturum_20261009_162308/harita.yaml   # sürücüler + Nav2 (çarpışma monitörü)
+saha/poz_ver.sh                                                                # robot başlangıç işaretinde, +x'e bakıyor
+SURE=5000 saha/kamera_baslat.sh
+```
+
+Başlangıç işaretinde lidar: ön 3.85 m (eşyalı), sol 1.86 m, sağ 0.72 m (odanın uzun düz duvarı).
+
+## Testler
+
+| # | Test | Komut | Analiz | Ölçüt |
+|---|---|---|---|---|
+| 1 | Ayar karşılaştırması (sabit sahne, 8 s/ayar) | `saha/kamera_ayar_testi.sh` | `analiz/derinlik_karakter.py <dizin>` | kare hızı, doluluk, zamansal σ (mesafe aralığına göre), kırpışma, uçan piksel |
+
+--- docs/nav_kavrama.md ---
+# Nav2 + Kavrama Mimarisi ve Ekip Kullanım Rehberi
+
+Bu belge; AgileX LIMO mobil robotu ve üzerine entegre Elephant Robotics myCobot 280 robot kolu için geliştirilen otonom seyrüsefer (Nav2), yaklaşma planlaması, hız/güvenlik zinciri, RViz görselleştirmesi, görev yönetimi ve kapalı çevrim kavrama mimarisini ayrıntılandırmaktadır. Hedef okuyucu kitlesi; görsel odometri (VO) üzerinde çalışan ekip arkadaşımız, robot kolu manipülasyonu üzerinde çalışan ekip arkadaşımız ve sistemin bakımını/geliştirmesini sürdürecek araştırmacılardır.
+
+---
+
+## 1. Mimari Özet ve Tasarım Kararları
+
+### 1.1. Tasarım Gerekçeleri ve Temel Mimari Karar
+İlk denemelerde ve simülasyon testlerinde (bkz. [sim_gercek.md](file:///home/gunes/limo_robot/limo_ws/docs/sim_gercek.md)), kavrama öncesi konumlandırma için 2B Lidar ICP ve küresel AMCL lokalizasyonuna dayanılmıştı. Ancak bu yaklaşım şu kritik sorunları ortaya çıkardı:
+1. **AMCL Yetersizliği:** AMCL küresel kestirimi simülasyonda dahi $5\text{--}11\text{ cm}$ ve $4^\circ$ mertebesinde kaymalar üretmektedir. Oysa robot kolunun nesneyi başarıyla yakalayabilmesi için kabul kriterimiz $|\Delta x| < 2\text{ cm}$, $|\Delta y| < 2\text{ cm}$ ve $|\text{yön hatası}| < 3^\circ$ sınırlarıdır.
+2. **Lidar ICP Kırılganlığı:** Lidar ICP, simetrik ortamlarda (koridor, düz duvarlar) açısal veya boyuna kaymalara açıktır; ayrıca kavranacak nesne lidar görüşünde yer aldığında harita ile uyuşmazlık yaratarak ince düzeltmeyi bozabilmektedir.
+
+**Alınan Kesin Mimari Karar:**
+- **Lidar Odometrisi / ICP Kaldırıldı:** Lidar ICP ve lidar odometrisi mimariden tamamen çıkarılmıştır. Lidar (`/scan`), yalnızca maliyet haritaları (costmap), güvenlik konisi durdurması, dinamik engel takibi ve Nav2 global/local engel tespiti için kullanılır.
+- **Odometri Kaynağı:** Taban odometrisi (`/odom`), Görsel Odometri (VO) + tekerlek enkoderi + IMU füzyonundan gelir (ekip arkadaşımızın sorumluluğundadır).
+- **Küresel Lokalizasyon (`map -> odom`):** Harita ile odometri arasındaki dönüşüm küresel lokalizasyon katmanından gelir (simülasyonda AMCL bir yer tutucu/referanstır; gerçekte görsel SLAM / harita tabanlı lokalizasyon olacaktır).
+- **Göreceli Kapalı Çevrim Son Yaklaşma:** Kavrama hassasiyeti, küresel harita koordinatlarından değil; nesnenin robot gövdesine göre doğrudan kamera/algı ile ölçüldüğü kapalı çevrim son yaklaşma denetleyicisinden ([`SonYaklasma`](file:///home/gunes/limo_robot/limo_ws/src/limo_autonomy/limo_autonomy/son_yaklasma.py#L184)) elde edilir. Böylece küresel haritadaki AMCL kayması veya odometrideki uzun vadeli sürüklenme kavrama başarısını etkilemez.
+
+Koordinat dönüşüm zinciri şu şekilde bağlanır:
+
+--- docs/oda_3b.md ---
+# Gerçek oda, 3B sim dünyası (27.10.2026)
+
+`limo_car/worlds/lab_oda_3b.world` + `limo_car/models/lab_oda_3b`: robotun bulunduğu laboratuvarın tavana kadar
+duvarları, dokulu zemini ve renkli 3B mobilyası. Önceki `lab_oda.world` (2B haritadan 0.6 m kutular, gri) yerine kamera
+tabanlı işler (görsel odometri, nesne tespiti, kavrama) için. Dünya = harita çerçevesi (`lab_oda.yaml`), robot (0, 0, 0).
+
+```bash
+export ROS_DOMAIN_ID=91 ROS_LOCALHOST_ONLY=0 FASTRTPS_DEFAULT_PROFILES_FILE=$PWD/src/limo_bringup/config/fastdds_sim_shm.xml
+ros2 launch limo_description gazebo_limo_mycobot.launch.py headless:=true use_rviz:=False gui:=False \
+  world:=$PWD/install/limo_car/share/limo_car/worlds/lab_oda_3b.world
+# Nav2 ile: limo_sim_nav2.launch.py ... world:=<aynı yol> map:=.../maps/lab_oda.yaml
+# kısa yol: saha/oda/sim_ac.sh <dünya>
+```
+
+## Üretim (`saha/oda/oda_kur.sh`, tek komut, ~5 dk)
+
+Girdi: 2 cm lidar haritası `lab_oda.yaml` + üç D435 kaydı (`~/limo_veri/vlmaps_sahne/{v2a,v2b,rs720_kapsama}_lidar`,
+lidar ICP pozlu, toplam ~4500 kare). Kamera pozları lidar haritasına göre düzeltilir (`kalib_harita.py`: gövdede
+dx +9 cm, dy +1 cm, dyaw −1.0°).
+
+
+--- docs/odom_analizi.md ---
+# Gerçek LIMO odometri analizi (24.09 kayıtları)
+
+Kayıtlar: `saha/oturum_20260924_163343/bag` (teleop haritalama), `saha/nav_20260924_164729/bag` (Nav2).
+Referans: ardışık lidar taramaları arası ICP (2 tarama arayla, ~0.33 s), uyum ≥ %70 olan çiftler.
+Betikler: `saha/analiz/` (`odom_saglik.py`, `scan_cek.py`, `icp_ardisik.py`).
+
+## 1. Yavaş dönüşler odom yönünden siliniyor (ana bulgu)
+
+Upstream Foxy sürücü, `robottaki upstream Foxy limo_base, src/limo_driver.cpp:502`:
+
+    if(delta_theta_< 0.1 && delta_theta_> -0.1) delta_theta_=0;
+
+IMU örneği başına 0.1° ölü bant → ~100 Hz'de 10°/s (0.175 rad/s) altındaki dönüşler odom yönüne yansımıyor.
+
+| ICP dönüş hızı [rad/s] | odom/ICP (Nav2 kaydı) | IMU yönü/ICP |
+|---|---|---|
+| 0.05–0.10 | 0.665 | 1.19* |
+| 0.10–0.20 | 0.677 | 1.07 |
+| 0.20–0.40 | 0.912 | 1.04 |
+| 0.40–0.80 | 0.992 | 1.00 |
+
+--- docs/olcum_protokolu.md ---
+# Ölçüm doğruluğunu artırma protokolü (sonraki robot oturumları için)
+
+13–21.10 kamera testlerinde doğruluğu sınırlayanlar ve her biri için yöntem. Öncelik sırasıyla.
+
+## 0. Gerekenler
+
+- Lazer mesafe ölçer (±2 mm) ya da 5 m şerit metre
+- Düz, sert hedef levha (≥ 60×40 cm, mat, açık renk; köpük levha/MDF)
+- Basılı ArUco/ChArUco tahtası (A3, düz yüzeye yapıştırılmış; kare boyu ölçülerek not edilir)
+- Kâğıt bant (zemin işaretleri), su terazisi/gönye
+
+## 1. Referansı kesinleştir (en önemli)
+
+Sorun: tüm ölçütler lidara ve 5 cm haritaya göre; lidar konumu (x 0.137 m) bile tahmin. Kalibrasyon araması iki
+kamerada da 7–9 cm ortak kayma buldu; kamera konumu ile derinlik ölçek hatası ayrılamıyor.
+
+1. **Fiziksel ölçüm** (robot kapalıyken, 10 dk): base_link = gövde merkezi (dönme ekseni). Metreyle ölç ve not et:
+   lidar dönme merkezinin base_link'e göre x, y, z'si; kamera ön camının (D435: sol IR sensörü, ön yüzden 4.2 mm geride
+   — üretici belgesi, doğrulanmalı) x, y, z'si. `config/kamera_kalibrasyon*.yaml` ve `ortam.sh lidar_tf_yayinla`.
+2. **Bilinen mesafede düz hedef** (lidardan bağımsız mutlak referans): levhayı robota dik, lazer metreyle ölçülen
+
+--- docs/robot_baglanti_rehberi.md ---
+# Gerçek LIMO'ya bağlanma, komut gönderme ve veri kaydı
+
+Robotta (Jetson Orin Nano, Ubuntu 20.04) **ROS 2 Foxy** doğrudan kurulu. PC'de **ROS 2 Humble** var.
+İkisi aynı Wi-Fi'da, aynı `ROS_DOMAIN_ID` ile birbirini otomatik bulur. Docker ya da köprü gerekmez.
+
+```
+ PC  (Humble, 192.168.0.199)                 LIMO (Foxy, 192.168.0.200?)
+ ┌──────────────────────────┐   Wi-Fi     ┌──────────────────────────────┐
+ │ ros2 topic pub /cmd_vel  │ ──────────► │ limo_base  (seri port, motor)│
+ │ ros2 bag record          │ ◄────────── │ lidar sürücüsü               │
+ │ ROS_DOMAIN_ID=42         │  /odom /imu │ ROS_DOMAIN_ID=42             │
+ └──────────────────────────┘    /scan    └──────────────────────────────┘
+```
+
+**Domain kuralı:** Aynı numarayı kullanan herkes aynı topic'leri görür. Arkadaşımız **77** kullanıyor
+ve orada Nav2'si açık kalabiliyor. Nav2 de `/cmd_vel` yayınlıyor. Onunla çakışmamak için biz kendi
+numaramızı (örnekte **42**) kullanıyoruz: hem robotta hem PC'de aynı numara olmalı.
+
+## 0. Robotu bul
+
+
+--- docs/sensor_modeli.md ---
+# LIMO sensör modeli: gerçek ölçüm → simülasyon
+
+Kaynak: 24.09.2026 saha kayıtları, robotun **durduğu** aralıklar (odom hızı ≈ 0)
+- `saha/oturum_20260924_163343/bag` (haritalama; Wi-Fi kaybı yok) — lidar için esas
+- `saha/nav_20260924_164729/bag` (Nav2) — IMU için ek
+
+Yöntem: IMU için durağan aralıklarda ortalama/std; lidar için ışınlar 0.5° açı kutularına toplanıp
+kutu başına **medyan mutlak sapma** (×1.4826), çünkü ortamda hareket eden insanlar std'yi bozuyordu.
+Sim karşılaştırması: `limo_ws/src/limo_bringup/scripts/sensor_olc.py` (aynı yöntem, bench dünyası, 30 s durağan).
+
+## IMU (taban kartı, `/imu`, çerçeve `imu_link`)
+
+| | Gerçek | Sim (önce) | Sim (sonra) |
+|---|---|---|---|
+| Yayın hızı | ~92 Hz (robotta) | 100 Hz | 90 Hz ayar, 83 Hz ölçülen |
+| Jiroskop σ x / y / z [rad/s] | 0.00088 / 0.0016 / 0.00087 | diff 0.0002; Ackermann gürültüsüz* | 0.00087 / 0.0016 / 0.00088 |
+| Jiroskop çözünürlüğü | **0.1°/s** (0.001745 rad/s adım) | — | modellenmedi (Gazebo nicemleme yok) |
+| Jiroskop sapması | ~8×10⁻⁵ rad/s | — | — (ihmal) |
+| İvmeölçer σ [m/s²] | 0.025 her eksende | diff 0.017 | 0.025 |
+| İvmeölçer z ortalaması | 10.04 (g=9.81 → %2.4 ölçek) | 9.80 | 9.80 (Gazebo işaretli sapma veremiyor) |
+
+--- docs/sim_gercek.md ---
+# Simülasyon = gerçek (27.10.2026)
+
+Amaç: Gazebo'daki LIMO (diff / FOUR_DIFF, myCobot'lu) gerçek robotla aynı sensör verisini ve kusurlarını üretsin; algı,
+görsel odometri ve Nav2 kodu sim ile gerçekte değişmeden çalışsın. Önceki kalibrasyon (IMU gürültüsü, lidar, taban
+tepki modeli): [sensor_modeli.md](sensor_modeli.md).
+
+## Kaynak ölçümler
+
+`saha/analiz/sim_param_cikar.py` → `saha/config/sim_gercek_param.yaml` (5 kayıt: 14.10, 21.10, 27.10; poz referansı
+lidar ICP `lidar_poz.py`; derinlik gürültüsü `kamera_ayar_testi.sh` + `derinlik_karakter.py`).
+
+| | Gerçek (ölçülen) | Sim (önce) | Sim (şimdi) |
+|---|---|---|---|
+| Kamera | RealSense D435 | yok (yorum satırı; eski Kinect bloğu) | D435 modeli `limo_d435.xacro` |
+| Renk | 1280×720, fx 908.97 (FOV 70.3°), 13.5–13.9 Hz, bozulma 0 | — | 1280×720, fx 908.98, 15 Hz |
+| Derinlik | 848×480, fx 429.73 (FOV 89.2°), 16UC1 mm | — | 848×480, fx 429.73, 16UC1 mm, ~12 Hz |
+| Derinlik gürültüsü | σ = 0.00176·z² (1–2 m 4.6 mm, 2–4 m 22 mm) | — | aynı (`sensor_modeli`) |
+| Derinlik boşlukları | sabit sahnede geçerli %48–57; nesne kenarında gölge şeridi | — | z ∉ [0.28, 10] m, kenar gölgesi 3 px, %2 rastgele |
+| Kamera çerçeveleri | camera_link → camera_{color,depth}_frame → *_optical_frame; renk y +0.0148 | camera_link, depth_link | gerçekle aynı |
+| Kamera montajı | base_link → camera_link (0.084, 0.0175, 0.028), roll 0.0015, pitch −0.0191 | (0.084, 0, 0.03) | gerçekle aynı |
+
+
+=== 5. MYC280_SIM SCRİPTLERİNİN İLK SATIRLARI ===
+--- src/myc280_sim/scripts/cube_approach.py ---
+#!/usr/bin/env python3
+"""Küpü RViz'de rastgele bir noktaya at -> çarpışma testi -> çarpışma varsa hata yaz,
+yoksa Cartesian path ile küpe ilerle.
+
+Her turda:
+  1. Küp sahneye eklenir (random:=true ise rastgele konum, değilse cube_x/y/z).
+  2. Küp robotun/gövdenin içine düştüyse: ÇARPIŞMA (küp başlangıç konumunda).
+  3. Hazır poz, hazır poza giden yol ve Cartesian yaklaşma yolu çarpışma için kontrol edilir
+     (MoveIt /check_state_validity). Çarpışan link çiftleri terminale yazılır.
+  4. Çarpışma yoksa kol hazır poza gider, Cartesian path ile küpe ilerler, geri çekilir.
+
+Kontrolcü yok: düğüm /joint_states'i kendisi yayınlar (sahte donanım).
+Konumlar `frame` (varsayılan joint1 = kolun tabanı) çerçevesindedir.
+
+Çarpışmayı bilerek denemek için: -p stop_distance:=-0.02 (flanş küpün içine girer).
+"""
+import itertools
+import math
+import random
+import time
+
+import rclpy
+from builtin_interfaces.msg import Duration
+from geometry_msgs.msg import Pose, PoseStamped
+from moveit_msgs.msg import CollisionObject, ObjectColor, PlanningScene, RobotState
+from moveit_msgs.srv import (ApplyPlanningScene, GetCartesianPath, GetPositionIK,
+                             GetStateValidity)
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+from shape_msgs.msg import SolidPrimitive
+from std_msgs.msg import ColorRGBA
+
+JOINTS = ['joint2_to_joint1', 'joint3_to_joint2', 'joint4_to_joint3',
+          'joint5_to_joint4', 'joint6_to_joint5', 'joint6output_to_joint6']
+WHEELS = ['front_left_wheel', 'front_right_wheel', 'rear_left_wheel', 'rear_right_wheel']
+CUBE_ID = 'cube'
+
+
+# ---------------- yönelim adayları ----------------
+def qmul(a, b):
+
+--- src/myc280_sim/scripts/random_collision_test.py ---
+#!/usr/bin/env python3
+"""Rastgele konum -> çarpışma testi -> çarpışma varsa hata yaz, yoksa RViz'de git.
+
+fake:=true  (varsayılan): düğüm /joint_states yayınlar (kontrolcü gerekmez).
+fake:=false: /arm_group_controller/joint_trajectory'ye komut gönderir.
+"""
+import random
+import time
+
+import rclpy
+from builtin_interfaces.msg import Duration
+from moveit_msgs.srv import GetStateValidity
+from rclpy.node import Node
+from sensor_msgs.msg import JointState
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+
+JOINTS = ['joint2_to_joint1', 'joint3_to_joint2', 'joint4_to_joint3',
+          'joint5_to_joint4', 'joint6_to_joint5', 'joint6output_to_joint6']
+EXTRA_JOINTS = ['front_left_wheel', 'front_right_wheel',
+                'rear_left_wheel', 'rear_right_wheel']      # sabit 0 yayınlanır
+URDF_LIMITS = [2.9322, 2.3562, 2.6180, 2.5307, 2.8798, 3.0543]   # +/- rad
+
+
+class RandomCollisionTest(Node):
+    def __init__(self):
+        super().__init__('random_collision_test')
+        self.declare_parameter('group', 'arm_group')
+        self.declare_parameter('fake', True)
+        self.declare_parameter('controller_topic', '/arm_group_controller/joint_trajectory')
+        self.declare_parameter('limit_ratio', 0.9)
+        self.declare_parameter('speed', 0.5)
+        self.declare_parameter('hold_time', 1.0)
+        self.declare_parameter('path_steps', 15)
+
+        self.group = self.get_parameter('group').value
+        self.fake = bool(self.get_parameter('fake').value)
+        self.ratio = float(self.get_parameter('limit_ratio').value)
+        self.speed = float(self.get_parameter('speed').value)
+        self.hold = float(self.get_parameter('hold_time').value)
+        self.steps = int(self.get_parameter('path_steps').value)
+
