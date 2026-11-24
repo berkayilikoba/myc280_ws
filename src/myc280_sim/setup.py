@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'random_collision_test = myc280_sim.random_collision_test:main',
             'cube_approach = scripts.cube_approach:main',
+            'cube_approachv2 = scripts.cube_approachv2:main',
         ],
     },
 )

@@ -8,3 +8,12 @@ cd ~/myc280_ws
 source /opt/ros/humble/setup.bash
 source ~/myc280_ws/install/setup.bash
 ros2 run myc280_sim cube_approach
+
+
+
+
+
+cd ~/myc280_ws
+source /opt/ros/humble/setup.bash
+source ~/myc280_ws/install/setup.bash
+ros2 run myc280_sim cube_approachv2

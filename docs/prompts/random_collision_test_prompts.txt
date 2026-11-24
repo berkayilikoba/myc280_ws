@@ -4,13 +4,13 @@ colcon build --symlink-install --packages-select myc280_sim
 source install/setup.bash
 
 
-
+cd ~/myc280_ws
 source /opt/ros/humble/setup.bash
 source ~/myc280_ws/install/setup.bash
 ros2 launch myc280_moveit_config demo.launch.py
 
 
-
+cd ~/myc280_ws
 source /opt/ros/humble/setup.bash
 source ~/myc280_ws/install/setup.bash
 ros2 run myc280_sim random_collision_test
